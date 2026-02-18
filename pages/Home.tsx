@@ -27,7 +27,7 @@ const Home: React.FC<HomeProps> = ({ onNavigate }) => {
         <div className="relative w-full max-w-7xl mx-auto aspect-video max-h-[80vh]">
           <video 
             autoPlay 
-            muted={false} // Allow sound by default if browser permits, or user can toggle
+            muted={true} // Allow sound by default if browser permits, or user can toggle
             loop 
             playsInline
             controls
