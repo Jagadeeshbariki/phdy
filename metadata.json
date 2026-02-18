@@ -1,0 +1,7 @@
+{
+  "name": "Copy of PHDY - Pedda Harivanam Development Youth",
+  "description": "A community-driven application showcasing the development work and members of the Pedda Harivanam village youth group.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
