@@ -10,14 +10,20 @@ const Home: React.FC<HomeProps> = ({ onNavigate }) => {
   const [history, setHistory] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch('./AboutConfig.json')
-      .then(res => res.json())
+    fetch(`/AboutConfig.json?v=${Date.now()}`)
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to load history');
+        return res.json();
+      })
       .then(data => {
-        if (data && data[0] && data[0].history) {
-          setHistory(data[0].history);
+        const config = Array.isArray(data) ? data[0] : data;
+        if (config && config.history) {
+          setHistory(config.history);
         }
       })
-      .catch(err => console.error("Error loading history:", err));
+      .catch(err => {
+        console.error("Error loading history:", err);
+      });
   }, []);
 
   return (
@@ -57,21 +63,27 @@ const Home: React.FC<HomeProps> = ({ onNavigate }) => {
                 A dedicated group of youth committed to the sustainable development and infrastructure of <span className="text-white">Pedda Harivanam</span>. Join us in making a difference.
               </p>
 
-              <div className="flex flex-col sm:flex-row gap-6 justify-center md:justify-start">
+              <div className="flex flex-col sm:flex-row gap-4 justify-center md:justify-start">
                 <button 
                   onClick={() => document.getElementById('our-story')?.scrollIntoView({ behavior: 'smooth' })}
-                  className="px-12 py-5 bg-orange-600 hover:bg-orange-700 text-white rounded-2xl font-black uppercase tracking-widest shadow-2xl shadow-orange-600/20 transition-all hover:scale-105 active:scale-95 flex items-center justify-center group"
+                  className="px-8 py-4 bg-orange-600 hover:bg-orange-700 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-orange-600/20 transition-all hover:scale-105 active:scale-95 flex items-center justify-center group text-xs md:text-sm"
                 >
                   <span>Our Story</span>
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 ml-3 group-hover:translate-y-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 ml-2 group-hover:translate-y-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 <button 
-                  onClick={() => onNavigate('contact')}
-                  className="px-12 py-5 bg-white/5 hover:bg-white/10 text-white border border-white/20 rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105"
+                  onClick={() => document.getElementById('members')?.scrollIntoView({ behavior: 'smooth' })}
+                  className="px-8 py-4 bg-white/5 hover:bg-white/10 text-white border border-white/20 rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105 text-xs md:text-sm"
                 >
-                  Join the Mission
+                  Meet the Team
+                </button>
+                <button 
+                  onClick={() => onNavigate('contact')}
+                  className="px-8 py-4 bg-white/5 hover:bg-white/10 text-white border border-white/20 rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105 text-xs md:text-sm"
+                >
+                  Join Us
                 </button>
               </div>
             </div>
@@ -113,7 +125,7 @@ const Home: React.FC<HomeProps> = ({ onNavigate }) => {
       </section>
 
       {/* Members Section - Fetched from Spreadsheet */}
-      <section className="py-24 px-6 bg-gray-50 border-t border-gray-100">
+      <section id="members" className="py-24 px-6 bg-gray-50 border-t border-gray-100">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-20">
             <span className="text-orange-600 font-black uppercase tracking-[0.4em] text-xs mb-4 block">Our Team</span>

@@ -14,19 +14,26 @@ const MembersList: React.FC = () => {
         setLoading(true);
         
         // 1. Fetch static legacy members from local config
-        const localRes = await fetch('./AboutConfig.json');
+        const localRes = await fetch(`/AboutConfig.json?v=${Date.now()}`);
+        if (!localRes.ok) throw new Error('Failed to load local members');
         const localData = await localRes.json();
-        const legacyMembers = localData[0]?.members || [];
+        const config = Array.isArray(localData) ? localData[0] : localData;
+        const legacyMembers = config?.members || [];
 
-        // 2. Fetch new members from Google Spreadsheet
+        // 2. Fetch new members from Google Spreadsheet with a timeout
         let spreadsheetMembers = [];
         if (SPREADSHEET_API_URL && !SPREADSHEET_API_URL.includes('YOUR_GOOGLE_APPS_SCRIPT_URL')) {
           try {
-            const spreadRes = await fetch(SPREADSHEET_API_URL);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+            
+            const spreadRes = await fetch(SPREADSHEET_API_URL, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            
             const spreadData = await spreadRes.json();
             spreadsheetMembers = Array.isArray(spreadData) ? spreadData : [];
           } catch (e) {
-            console.warn("Spreadsheet API fetch failed, showing legacy data only.", e);
+            console.warn("Spreadsheet API fetch failed or timed out, showing legacy data only.", e);
           }
         }
 
