@@ -5,7 +5,7 @@ const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLv
 const CLOUDINARY_CLOUD_NAME = 'dbohmpxko';
 const CLOUDINARY_UPLOAD_PRESET = 'phdy_preset'; 
 
-type AdminTab = 'members' | 'accounting';
+type AdminTab = 'members' | 'accounting' | 'works';
 
 interface AdminPageProps {
   loggedInUser: LoggedInUser | null;
@@ -22,13 +22,23 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
   // Form states
   const [memberFormData, setMemberFormData] = useState({ Name: '', Age: '', Qualification: '', Motivation: '', IdNo: '' });
   const [accountingFormData, setAccountingFormData] = useState({ FinancialYear: '2024-25', Month: 'January', Type: 'Expenditure', Description: '', BillLink: '' });
+  const [worksFormData, setWorksFormData] = useState({ title: '', date: '', description: '', youtubeLink: '' });
+  
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  
+  // Multiple files for works
+  const [workPhotos, setWorkPhotos] = useState<File[]>([]);
+  const [workDocs, setWorkDocs] = useState<File[]>([]);
+  
   const [status, setStatus] = useState<'idle' | 'uploading' | 'submitting' | 'success' | 'error'>('idle');
   const [spreadsheetMembers, setSpreadsheetMembers] = useState<any[]>([]);
+  const [spreadsheetWorks, setSpreadsheetWorks] = useState<any[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const workPhotosRef = useRef<HTMLInputElement>(null);
+  const workDocsRef = useRef<HTMLInputElement>(null);
 
   const fetchSpreadsheetMembers = async () => {
     if (!SPREADSHEET_API_URL || !loggedInUser) return;
@@ -44,8 +54,25 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     }
   };
 
+  const fetchSpreadsheetWorks = async () => {
+    if (!SPREADSHEET_API_URL || !loggedInUser) return;
+    setIsRefreshing(true);
+    try {
+      const res = await fetch(`${SPREADSHEET_API_URL}?type=works`);
+      const data = await res.json();
+      setSpreadsheetWorks(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error("Failed to fetch works:", e);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   useEffect(() => {
-    if (loggedInUser && activeTab === 'members') fetchSpreadsheetMembers();
+    if (loggedInUser) {
+      if (activeTab === 'members') fetchSpreadsheetMembers();
+      if (activeTab === 'works') fetchSpreadsheetWorks();
+    }
   }, [activeTab, loggedInUser]);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -73,16 +100,26 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     }
   };
 
+  const uploadToCloudinary = async (file: File, resourceType: 'image' | 'raw' | 'auto' = 'auto') => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+    
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/${resourceType === 'image' ? 'image' : 'raw'}/upload`, {
+      method: 'POST',
+      body: formData
+    });
+    
+    if (!res.ok) throw new Error('Cloudinary upload failed');
+    return await res.json();
+  };
+
   const handleMemberSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedFile) return alert("Photo is required.");
     setStatus('uploading');
     try {
-      const cloudinaryFormData = new FormData();
-      cloudinaryFormData.append('file', selectedFile);
-      cloudinaryFormData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
-      const cloudinaryRes = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, { method: 'POST', body: cloudinaryFormData });
-      const cloudinaryData = await cloudinaryRes.json();
+      const cloudinaryData = await uploadToCloudinary(selectedFile, 'image');
       setStatus('submitting');
       await fetch(SPREADSHEET_API_URL, {
         method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
@@ -107,6 +144,60 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       setStatus('success');
       setAccountingFormData({ ...accountingFormData, Description: '', BillLink: '' });
       setTimeout(() => setStatus('idle'), 3000);
+    } catch (err) { setStatus('error'); }
+  };
+
+  const handleWorksSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (loggedInUser?.role !== 'admin') return alert("Admin access required.");
+    setStatus('uploading');
+    try {
+      // Upload Photos
+      const photoUrls = [];
+      for (const file of workPhotos) {
+        const data = await uploadToCloudinary(file, 'image');
+        photoUrls.push(data.secure_url);
+      }
+
+      // Upload Documents
+      const docUrls = [];
+      for (const file of workDocs) {
+        const data = await uploadToCloudinary(file, 'raw');
+        docUrls.push({ name: file.name, url: data.secure_url });
+      }
+
+      setStatus('submitting');
+      await fetch(SPREADSHEET_API_URL, {
+        method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          action: 'add_work', 
+          ...worksFormData,
+          photos: JSON.stringify(photoUrls),
+          documents: JSON.stringify(docUrls)
+        }),
+      });
+      
+      setStatus('success');
+      setWorksFormData({ title: '', date: '', description: '', youtubeLink: '' });
+      setWorkPhotos([]);
+      setWorkDocs([]);
+      fetchSpreadsheetWorks();
+      setTimeout(() => setStatus('idle'), 3000);
+    } catch (err) { 
+      console.error(err);
+      setStatus('error'); 
+    }
+  };
+
+  const handleDeleteWork = async (title: string) => {
+    if (!window.confirm(`Are you sure you want to delete the work record: "${title}"?`)) return;
+    setStatus('submitting');
+    try {
+      await fetch(SPREADSHEET_API_URL, {
+        method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_work', title: title }),
+      });
+      setTimeout(() => { fetchSpreadsheetWorks(); setStatus('idle'); }, 1500);
     } catch (err) { setStatus('error'); }
   };
 
@@ -193,11 +284,16 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
 
         <div className="flex justify-center space-x-4">
           <button onClick={() => setActiveTab('members')} className={`px-8 py-3 rounded-xl font-black uppercase tracking-widest text-sm transition-all ${activeTab === 'members' ? 'bg-orange-600 text-white shadow-lg' : 'bg-white text-gray-400'}`}>Members</button>
-          {loggedInUser.role === 'admin' && <button onClick={() => setActiveTab('accounting')} className={`px-8 py-3 rounded-xl font-black uppercase tracking-widest text-sm transition-all ${activeTab === 'accounting' ? 'bg-gray-900 text-white shadow-lg' : 'bg-white text-gray-400'}`}>Accounting</button>}
+          {loggedInUser.role === 'admin' && (
+            <>
+              <button onClick={() => setActiveTab('works')} className={`px-8 py-3 rounded-xl font-black uppercase tracking-widest text-sm transition-all ${activeTab === 'works' ? 'bg-orange-600 text-white shadow-lg' : 'bg-white text-gray-400'}`}>Our Works</button>
+              <button onClick={() => setActiveTab('accounting')} className={`px-8 py-3 rounded-xl font-black uppercase tracking-widest text-sm transition-all ${activeTab === 'accounting' ? 'bg-gray-900 text-white shadow-lg' : 'bg-white text-gray-400'}`}>Accounting</button>
+            </>
+          )}
         </div>
 
         <div className="transition-all duration-500">
-          {activeTab === 'members' ? (
+          {activeTab === 'members' && (
             <div className="space-y-12 animate-fadeIn">
               {/* Member Add Form */}
               <div className="bg-white rounded-[40px] p-8 md:p-12 shadow-2xl border border-orange-50 max-w-3xl mx-auto">
@@ -254,7 +350,94 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                 </div>
               </div>
             </div>
-          ) : (
+          )}
+
+          {activeTab === 'works' && (
+            <div className="space-y-12 animate-fadeIn">
+              <div className="max-w-3xl mx-auto bg-white rounded-[40px] p-8 md:p-12 shadow-2xl border border-orange-50">
+                <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tight mb-8">Add New Work Record</h2>
+                <form onSubmit={handleWorksSubmit} className="space-y-6">
+                  <input required type="text" placeholder="Work Heading" className="w-full px-6 py-4 rounded-2xl bg-gray-50 border border-gray-100 outline-none" value={worksFormData.title} onChange={(e)=>setWorksFormData({...worksFormData, title: e.target.value})} />
+                  <input required type="date" className="w-full px-6 py-4 rounded-2xl bg-gray-50 border border-gray-100 outline-none" value={worksFormData.date} onChange={(e)=>setWorksFormData({...worksFormData, date: e.target.value})} />
+                  <textarea required placeholder="Work Description" className="w-full px-6 py-4 rounded-2xl bg-gray-50 border border-gray-100 outline-none h-32" value={worksFormData.description} onChange={(e)=>setWorksFormData({...worksFormData, description: e.target.value})} />
+                  <input type="text" placeholder="YouTube Video ID (e.g. dQw4w9WgXcQ)" className="w-full px-6 py-4 rounded-2xl bg-gray-50 border border-gray-100 outline-none" value={worksFormData.youtubeLink} onChange={(e)=>setWorksFormData({...worksFormData, youtubeLink: e.target.value})} />
+                  
+                  <div className="space-y-4">
+                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Photos (Multiple)</label>
+                    <input type="file" multiple accept="image/*" className="hidden" ref={workPhotosRef} onChange={(e) => setWorkPhotos(Array.from(e.target.files || []))} />
+                    <button type="button" onClick={() => workPhotosRef.current?.click()} className="w-full py-4 border-2 border-dashed border-gray-200 rounded-2xl text-gray-400 font-bold uppercase text-xs">
+                      {workPhotos.length > 0 ? `${workPhotos.length} Photos Selected` : 'Select Photos'}
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Documents (PDF, etc.)</label>
+                    <input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx" className="hidden" ref={workDocsRef} onChange={(e) => setWorkDocs(Array.from(e.target.files || []))} />
+                    <button type="button" onClick={() => workDocsRef.current?.click()} className="w-full py-4 border-2 border-dashed border-gray-200 rounded-2xl text-gray-400 font-bold uppercase text-xs">
+                      {workDocs.length > 0 ? `${workDocs.length} Documents Selected` : 'Select Documents'}
+                    </button>
+                  </div>
+
+                  <button type="submit" disabled={status === 'uploading' || status === 'submitting'} className="w-full py-5 bg-orange-600 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-orange-200 transition-all active:scale-95 disabled:opacity-50">
+                    {status === 'uploading' ? 'Uploading Files...' : status === 'submitting' ? 'Saving Record...' : 'Publish Work Record'}
+                  </button>
+                  
+                  {status === 'success' && <p className="text-green-600 font-bold text-center animate-bounce">Work record added successfully!</p>}
+                  {status === 'error' && <p className="text-red-600 font-bold text-center">Failed to add record. Try again.</p>}
+                </form>
+              </div>
+
+              {/* Works Table */}
+              <div className="bg-white rounded-[40px] p-8 md:p-12 shadow-2xl border border-gray-100">
+                <div className="flex justify-between items-center mb-8">
+                  <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tight">Recent Work Records</h2>
+                  <button onClick={fetchSpreadsheetWorks} className="text-orange-600 font-bold">Sync Data</button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="border-b border-gray-100">
+                      <tr className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                        <th className="pb-4">Date</th>
+                        <th className="pb-4">Title</th>
+                        <th className="pb-4">Photos</th>
+                        <th className="pb-4">Docs</th>
+                        <th className="pb-4 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {spreadsheetWorks.map((w, idx) => (
+                        <tr key={idx}>
+                          <td className="py-4 text-sm font-bold text-gray-500">{w.date}</td>
+                          <td className="py-4 font-bold">{w.title}</td>
+                          <td className="py-4 text-sm text-gray-500">
+                            {w.photos ? JSON.parse(w.photos).length : 0}
+                          </td>
+                          <td className="py-4 text-sm text-gray-500">
+                            {w.documents ? JSON.parse(w.documents).length : 0}
+                          </td>
+                          <td className="py-4 text-right">
+                            <button 
+                              onClick={() => handleDeleteWork(w.title)}
+                              className="text-red-500 font-bold hover:underline text-xs"
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {spreadsheetWorks.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="py-8 text-center text-gray-400 italic">No work records found in spreadsheet.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'accounting' && (
             <div className="max-w-3xl mx-auto animate-fadeIn bg-white rounded-[40px] p-8 md:p-12 shadow-2xl border border-gray-900">
               <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tight mb-8">Village Financial Entry</h2>
               <form onSubmit={handleAccountingSubmit} className="space-y-6">

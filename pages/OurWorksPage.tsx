@@ -3,15 +3,55 @@ import React, { useState, useEffect } from 'react';
 import { WORKS_DATA } from '../constants';
 import { Work } from '../types';
 
+const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
+
 const OurWorksPage: React.FC = () => {
   const [selectedWork, setSelectedWork] = useState<Work | null>(null);
   const [origin, setOrigin] = useState('');
+  const [works, setWorks] = useState<Work[]>(WORKS_DATA);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     // Capturing the origin is crucial for YouTube player initialization in many iframe environments
     if (typeof window !== 'undefined') {
       setOrigin(window.location.origin);
     }
+
+    const fetchWorks = async () => {
+      try {
+        const res = await fetch(`${SPREADSHEET_API_URL}?type=works`);
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          const formattedWorks: Work[] = data.map((item: any, index: number) => {
+            let photos = [];
+            let documents = [];
+            try {
+              photos = item.photos ? JSON.parse(item.photos) : [];
+            } catch (e) { console.error("Error parsing photos", e); }
+            try {
+              documents = item.documents ? JSON.parse(item.documents) : [];
+            } catch (e) { console.error("Error parsing documents", e); }
+
+            return {
+              id: 1000 + index,
+              title: item.title,
+              date: item.date,
+              description: item.description,
+              photos: photos,
+              videos: item.youtubeLink ? [item.youtubeLink] : [],
+              documents: documents
+            };
+          });
+          setWorks([...WORKS_DATA, ...formattedWorks]);
+        }
+      } catch (err) {
+        console.error("Failed to fetch works:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchWorks();
   }, []);
 
   const getShortDescription = (description: string) => {
@@ -130,12 +170,18 @@ const OurWorksPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {WORKS_DATA.map((work) => (
-            <div 
-              key={work.id}
-              className="bg-white rounded-3xl overflow-hidden shadow-sm border border-orange-50 hover:shadow-2xl hover:-translate-y-2 transition-all duration-300 flex flex-col group"
-            >
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20 space-y-4">
+            <div className="animate-spin rounded-full h-12 w-12 border-4 border-orange-100 border-t-orange-600"></div>
+            <p className="text-orange-600 font-bold animate-pulse text-xs tracking-widest uppercase">Loading Works...</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {works.map((work) => (
+              <div 
+                key={work.id}
+                className="bg-white rounded-3xl overflow-hidden shadow-sm border border-orange-50 hover:shadow-2xl hover:-translate-y-2 transition-all duration-300 flex flex-col group"
+              >
               <div 
                 className="relative h-56 overflow-hidden cursor-pointer"
                 onClick={() => setSelectedWork(work)}
@@ -187,9 +233,10 @@ const OurWorksPage: React.FC = () => {
             </div>
           ))}
         </div>
-      </div>
+      )}
     </div>
-  );
+  </div>
+);
 };
 
 export default OurWorksPage;
