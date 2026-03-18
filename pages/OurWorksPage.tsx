@@ -54,6 +54,26 @@ const OurWorksPage: React.FC = () => {
     fetchWorks();
   }, []);
 
+  const handleDownload = async (url: string, filename: string) => {
+    try {
+      // Fetch the file as a blob to bypass browser viewer issues and force download
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error('Download failed:', error);
+      // Fallback: open in new tab if blob download fails
+      window.open(url, '_blank');
+    }
+  };
+
   const getShortDescription = (description: string) => {
     const words = description.split(" ");
     if (words.length > 25) {
@@ -136,20 +156,45 @@ const OurWorksPage: React.FC = () => {
               <h3 className="text-2xl font-bold text-gray-900 mb-6 border-b-2 border-orange-100 pb-2">Related Documents</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {selectedWork.documents.map((doc, i) => (
-                  <a 
-                    key={i} 
-                    href={doc.url} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="flex items-center p-4 bg-orange-50 border border-orange-100 rounded-xl hover:bg-orange-100 transition-all group"
-                  >
-                    <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center text-orange-600 mr-4 shadow-sm">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
+                  <div key={i} className="flex flex-col space-y-2">
+                    <div className="flex items-center p-4 bg-orange-50 border border-orange-100 rounded-xl hover:bg-orange-100 transition-all group relative">
+                      <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center text-orange-600 mr-4 shadow-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-orange-800 truncate">{doc.name}</p>
+                        <div className="flex gap-4 mt-1">
+                          <a 
+                            href={doc.url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-[10px] font-black uppercase tracking-widest text-orange-600 hover:text-orange-700 underline"
+                          >
+                            Open File
+                          </a>
+                          <a 
+                            href={`https://docs.google.com/viewer?url=${encodeURIComponent(doc.url)}`}
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-gray-700 underline"
+                          >
+                            Browser Preview
+                          </a>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => handleDownload(doc.url, doc.name)}
+                        className="ml-4 p-2 bg-white rounded-lg text-orange-600 hover:bg-orange-600 hover:text-white transition-all shadow-sm"
+                        title="Download"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                      </button>
                     </div>
-                    <span className="font-semibold text-orange-800">{doc.name}</span>
-                  </a>
+                  </div>
                 ))}
               </div>
             </div>

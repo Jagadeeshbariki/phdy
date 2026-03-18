@@ -34,6 +34,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
   const [status, setStatus] = useState<'idle' | 'uploading' | 'submitting' | 'success' | 'error'>('idle');
   const [spreadsheetMembers, setSpreadsheetMembers] = useState<any[]>([]);
   const [spreadsheetWorks, setSpreadsheetWorks] = useState<any[]>([]);
+  const [spreadsheetAccounting, setSpreadsheetAccounting] = useState<any[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -44,11 +45,25 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     if (!SPREADSHEET_API_URL || !loggedInUser) return;
     setIsRefreshing(true);
     try {
-      const res = await fetch(SPREADSHEET_API_URL);
+      const res = await fetch(`${SPREADSHEET_API_URL}?type=members`);
       const data = await res.json();
       setSpreadsheetMembers(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error("Failed to fetch members:", e);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const fetchSpreadsheetAccounting = async () => {
+    if (!SPREADSHEET_API_URL || !loggedInUser) return;
+    setIsRefreshing(true);
+    try {
+      const res = await fetch(`${SPREADSHEET_API_URL}?type=accounting`);
+      const data = await res.json();
+      setSpreadsheetAccounting(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error("Failed to fetch accounting:", e);
     } finally {
       setIsRefreshing(false);
     }
@@ -72,6 +87,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     if (loggedInUser) {
       if (activeTab === 'members') fetchSpreadsheetMembers();
       if (activeTab === 'works') fetchSpreadsheetWorks();
+      if (activeTab === 'accounting') fetchSpreadsheetAccounting();
     }
   }, [activeTab, loggedInUser]);
 
@@ -104,13 +120,19 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     const formData = new FormData();
     formData.append('file', file);
     formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+    formData.append('resource_type', resourceType);
     
-    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/${resourceType === 'image' ? 'image' : 'raw'}/upload`, {
+    // Standard Cloudinary upload endpoint
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/upload`, {
       method: 'POST',
       body: formData
     });
     
-    if (!res.ok) throw new Error('Cloudinary upload failed');
+    if (!res.ok) {
+      const errorData = await res.json();
+      console.error('Cloudinary upload error:', errorData);
+      throw new Error('Cloudinary upload failed');
+    }
     return await res.json();
   };
 
@@ -143,6 +165,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       });
       setStatus('success');
       setAccountingFormData({ ...accountingFormData, Description: '', BillLink: '' });
+      fetchSpreadsheetAccounting();
       setTimeout(() => setStatus('idle'), 3000);
     } catch (err) { setStatus('error'); }
   };
@@ -162,6 +185,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       // Upload Documents
       const docUrls = [];
       for (const file of workDocs) {
+        // Explicitly use 'raw' for documents to ensure they are stored as files
         const data = await uploadToCloudinary(file, 'raw');
         docUrls.push({ name: file.name, url: data.secure_url });
       }
@@ -187,6 +211,18 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       console.error(err);
       setStatus('error'); 
     }
+  };
+
+  const handleDeleteAccounting = async (description: string) => {
+    if (!window.confirm(`Are you sure you want to delete this accounting entry: "${description}"?`)) return;
+    setStatus('submitting');
+    try {
+      await fetch(SPREADSHEET_API_URL, {
+        method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_accounting', description: description }),
+      });
+      setTimeout(() => { fetchSpreadsheetAccounting(); setStatus('idle'); }, 1500);
+    } catch (err) { setStatus('error'); }
   };
 
   const handleDeleteWork = async (title: string) => {
@@ -438,22 +474,72 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
           )}
 
           {activeTab === 'accounting' && (
-            <div className="max-w-3xl mx-auto animate-fadeIn bg-white rounded-[40px] p-8 md:p-12 shadow-2xl border border-gray-900">
-              <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tight mb-8">Village Financial Entry</h2>
-              <form onSubmit={handleAccountingSubmit} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <select className="px-6 py-4 rounded-2xl bg-gray-50" value={accountingFormData.FinancialYear} onChange={(e)=>setAccountingFormData({...accountingFormData, FinancialYear: e.target.value})}><option>2024-25</option><option>2025-26</option></select>
-                  <select className="px-6 py-4 rounded-2xl bg-gray-50" value={accountingFormData.Month} onChange={(e)=>setAccountingFormData({...accountingFormData, Month: e.target.value})}>{['January','February','March','April','May','June','July','August','September','October','November','December'].map(m=><option key={m}>{m}</option>)}</select>
+            <div className="space-y-12 animate-fadeIn">
+              <div className="max-w-3xl mx-auto bg-white rounded-[40px] p-8 md:p-12 shadow-2xl border border-gray-900">
+                <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tight mb-8">Village Financial Entry</h2>
+                <form onSubmit={handleAccountingSubmit} className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <select className="px-6 py-4 rounded-2xl bg-gray-50" value={accountingFormData.FinancialYear} onChange={(e)=>setAccountingFormData({...accountingFormData, FinancialYear: e.target.value})}><option>2024-25</option><option>2025-26</option></select>
+                    <select className="px-6 py-4 rounded-2xl bg-gray-50" value={accountingFormData.Month} onChange={(e)=>setAccountingFormData({...accountingFormData, Month: e.target.value})}>{['January','February','March','April','May','June','July','August','September','October','November','December'].map(m=><option key={m}>{m}</option>)}</select>
+                  </div>
+                  <div className="flex gap-4">
+                    {['Income','Expenditure'].map(t=>(
+                      <button type="button" key={t} onClick={()=>setAccountingFormData({...accountingFormData, Type: t})} className={`flex-1 py-4 rounded-2xl border-2 font-black uppercase ${accountingFormData.Type === t ? 'bg-orange-600 text-white border-orange-600' : 'bg-gray-50 text-gray-400 border-gray-100'}`}>{t}</button>
+                    ))}
+                  </div>
+                  <input required type="text" placeholder="Description" className="w-full px-6 py-4 rounded-2xl bg-gray-50" value={accountingFormData.Description} onChange={(e)=>setAccountingFormData({...accountingFormData, Description: e.target.value})} />
+                  <input required type="url" placeholder="Official Link (Bill/Receipt)" className="w-full px-6 py-4 rounded-2xl bg-gray-50" value={accountingFormData.BillLink} onChange={(e)=>setAccountingFormData({...accountingFormData, BillLink: e.target.value})} />
+                  <button type="submit" className="w-full py-5 bg-gray-900 text-white rounded-2xl font-black uppercase tracking-widest">Log Financial Record</button>
+                </form>
+              </div>
+
+              {/* Accounting Table */}
+              <div className="bg-white rounded-[40px] p-8 md:p-12 shadow-2xl border border-gray-100">
+                <div className="flex justify-between items-center mb-8">
+                  <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tight">Recent Financial Entries</h2>
+                  <button onClick={fetchSpreadsheetAccounting} className="text-orange-600 font-bold">Sync Data</button>
                 </div>
-                <div className="flex gap-4">
-                  {['Income','Expenditure'].map(t=>(
-                    <button type="button" key={t} onClick={()=>setAccountingFormData({...accountingFormData, Type: t})} className={`flex-1 py-4 rounded-2xl border-2 font-black uppercase ${accountingFormData.Type === t ? 'bg-orange-600 text-white border-orange-600' : 'bg-gray-50 text-gray-400 border-gray-100'}`}>{t}</button>
-                  ))}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="border-b border-gray-100">
+                      <tr className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                        <th className="pb-4">Year</th>
+                        <th className="pb-4">Month</th>
+                        <th className="pb-4">Type</th>
+                        <th className="pb-4">Description</th>
+                        <th className="pb-4 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {spreadsheetAccounting.map((a, idx) => (
+                        <tr key={idx}>
+                          <td className="py-4 text-sm font-bold text-gray-500">{a.FinancialYear}</td>
+                          <td className="py-4 text-sm font-bold text-gray-500">{a.Month}</td>
+                          <td className="py-4">
+                            <span className={`px-2 py-1 rounded text-[9px] font-black uppercase ${a.Type === 'Income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                              {a.Type}
+                            </span>
+                          </td>
+                          <td className="py-4 font-bold text-sm truncate max-w-[200px]">{a.Description}</td>
+                          <td className="py-4 text-right">
+                            <button 
+                              onClick={() => handleDeleteAccounting(a.Description)}
+                              className="text-red-500 font-bold hover:underline text-xs"
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {spreadsheetAccounting.length === 0 && (
+                        <tr>
+                          <td colSpan={5} className="py-8 text-center text-gray-400 italic">No financial records found.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
-                <input required type="text" placeholder="Description" className="w-full px-6 py-4 rounded-2xl bg-gray-50" value={accountingFormData.Description} onChange={(e)=>setAccountingFormData({...accountingFormData, Description: e.target.value})} />
-                <input required type="url" placeholder="Official Link (Bill/Receipt)" className="w-full px-6 py-4 rounded-2xl bg-gray-50" value={accountingFormData.BillLink} onChange={(e)=>setAccountingFormData({...accountingFormData, BillLink: e.target.value})} />
-                <button type="submit" className="w-full py-5 bg-gray-900 text-white rounded-2xl font-black uppercase tracking-widest">Log Financial Record</button>
-              </form>
+              </div>
             </div>
           )}
         </div>

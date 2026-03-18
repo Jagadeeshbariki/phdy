@@ -27,7 +27,7 @@ const MembersList: React.FC = () => {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
             
-            const spreadRes = await fetch(SPREADSHEET_API_URL, { signal: controller.signal });
+            const spreadRes = await fetch(`${SPREADSHEET_API_URL}?type=members`, { signal: controller.signal });
             clearTimeout(timeoutId);
             
             const spreadData = await spreadRes.json();
