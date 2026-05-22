@@ -9,6 +9,8 @@ export interface MonthData {
   details: {
     Income: Transaction[];
     Expenditure: Transaction[];
+    noIncome?: boolean;
+    noExpenditure?: boolean;
   };
 }
 

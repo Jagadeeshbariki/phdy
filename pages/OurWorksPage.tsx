@@ -20,17 +20,27 @@ const OurWorksPage: React.FC = () => {
     const fetchWorks = async () => {
       try {
         const res = await fetch(`${SPREADSHEET_API_URL}?type=works`);
-        const data = await res.json();
+        const text = await res.text();
+        let data = [];
+        if (text.trim().startsWith('<')) {
+          console.warn("Spreadsheet API returned HTML instead of JSON for works. Check the Apps Script deployment.");
+        } else {
+          try {
+            data = JSON.parse(text);
+          } catch (e) {
+            console.warn("Failed to parse works data as JSON:", e);
+          }
+        }
         if (Array.isArray(data)) {
           const formattedWorks: Work[] = data.map((item: any, index: number) => {
             let photos = [];
             let documents = [];
             try {
               photos = item.photos ? JSON.parse(item.photos) : [];
-            } catch (e) { console.error("Error parsing photos", e); }
+            } catch (e) { console.warn("Error parsing photos", e); }
             try {
               documents = item.documents ? JSON.parse(item.documents) : [];
-            } catch (e) { console.error("Error parsing documents", e); }
+            } catch (e) { console.warn("Error parsing documents", e); }
 
             return {
               id: 1000 + index,
@@ -45,7 +55,7 @@ const OurWorksPage: React.FC = () => {
           setWorks([...WORKS_DATA, ...formattedWorks]);
         }
       } catch (err) {
-        console.error("Failed to fetch works:", err);
+        console.warn("Failed to fetch works:", err);
       } finally {
         setLoading(false);
       }

@@ -1,30 +1,17 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import MembersList from '../components/MembersList';
+import aboutConfigData from '../public/AboutConfig.json';
 
 interface HomeProps {
   onNavigate: (page: 'home' | 'members' | 'ourworks' | 'accounting' | 'contact' | 'admin') => void;
 }
 
 const Home: React.FC<HomeProps> = ({ onNavigate }) => {
-  const [history, setHistory] = useState<any[]>([]);
-
-  useEffect(() => {
-    fetch(`/AboutConfig.json?v=${Date.now()}`)
-      .then(res => {
-        if (!res.ok) throw new Error('Failed to load history');
-        return res.json();
-      })
-      .then(data => {
-        const config = Array.isArray(data) ? data[0] : data;
-        if (config && config.history) {
-          setHistory(config.history);
-        }
-      })
-      .catch(err => {
-        console.error("Error loading history:", err);
-      });
-  }, []);
+  const [history] = useState<any[]>(() => {
+    const config = Array.isArray(aboutConfigData) ? aboutConfigData[0] : aboutConfigData;
+    return config?.history || [];
+  });
 
   return (
     <div className="animate-fadeIn">

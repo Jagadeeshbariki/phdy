@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { ACCOUNT_DATA, YearData, Transaction } from '../AccountData';
+import { getFinancialYearsList, getCurrentFinancialYear } from '../types';
 
 const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
 
@@ -55,10 +56,20 @@ const AccountingPage: React.FC = () => {
     const fetchDynamicAccounting = async () => {
       try {
         const res = await fetch(`${SPREADSHEET_API_URL}?type=accounting`);
-        const data = await res.json();
+        const text = await res.text();
+        let data = [];
+        if (text.trim().startsWith('<')) {
+          console.warn("Spreadsheet API returned HTML instead of JSON for accounting data. Check the Apps Script deployment.");
+        } else {
+          try {
+            data = JSON.parse(text);
+          } catch (e) {
+            console.warn("Failed to parse accounting data as JSON:", e);
+          }
+        }
         setDynamicRecords(Array.isArray(data) ? data : []);
       } catch (err) {
-        console.error("Failed to load dynamic accounting:", err);
+        console.warn("Failed to load dynamic accounting:", err);
       } finally {
         setLoading(false);
       }
@@ -71,12 +82,7 @@ const AccountingPage: React.FC = () => {
     const now = new Date();
     const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     const month = monthNames[now.getMonth()];
-    
-    // Financial year logic (April start)
-    const year = now.getFullYear();
-    const finYear = now.getMonth() >= 3 
-      ? `${year}-${(year + 1).toString().slice(-2)}` 
-      : `${year - 1}-${year.toString().slice(-2)}`;
+    const finYear = getCurrentFinancialYear();
     
     return { month, finYear };
   }, []);
@@ -84,6 +90,14 @@ const AccountingPage: React.FC = () => {
   // Merge static ACCOUNT_DATA with dynamic records from spreadsheet
   const mergedData = useMemo(() => {
     const data: YearData[] = JSON.parse(JSON.stringify(ACCOUNT_DATA));
+
+    // Ensure all financial years from the dynamic list are present
+    const allYears = getFinancialYearsList();
+    allYears.forEach(y => {
+      if (!data.some(yearObj => yearObj.year === y)) {
+        data.push({ year: y, Months: [] });
+      }
+    });
 
     dynamicRecords.forEach(record => {
       const { FinancialYear, Month, Type, Description, BillLink } = record;
@@ -108,9 +122,13 @@ const AccountingPage: React.FC = () => {
         pdfUrl: BillLink
       };
 
-      if (Type === 'Income') {
+      if (Type === 'No Income') {
+        monthObj.details.noIncome = true;
+      } else if (Type === 'No Expenditure') {
+        monthObj.details.noExpenditure = true;
+      } else if (Type === 'Income') {
         monthObj.details.Income.push(newTransaction);
-      } else {
+      } else if (Type === 'Expenditure') {
         monthObj.details.Expenditure.push(newTransaction);
       }
     });
@@ -207,67 +225,83 @@ const AccountingPage: React.FC = () => {
           {mergedData.map((year) => (
             <AccordionItem key={year.year} title={`Financial Year: ${year.year}`} defaultOpen={false}>
               <div className="space-y-4">
-                {year.Months.map((month) => (
-                  <AccordionItem key={month.month} title={month.month} depth={1} defaultOpen={false}>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 py-2">
-                      {/* Income Section */}
-                      <div>
-                        <h5 className="flex items-center text-green-700 font-black mb-4 uppercase text-[10px] tracking-widest">
-                          <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                          Income
-                        </h5>
-                        {month.details.Income.length > 0 ? (
-                          <div className="space-y-3">
-                            {month.details.Income.map((inc, iIdx) => (
-                              <a 
-                                key={iIdx} 
-                                href={inc.pdfUrl} 
-                                target="_blank" 
-                                rel="noreferrer" 
-                                className="group block p-4 bg-green-50/30 rounded-2xl border border-green-100 hover:bg-green-100/50 transition-all shadow-sm flex items-center justify-between"
-                              >
-                                <span className="text-xs font-bold text-green-900 group-hover:text-green-700 leading-relaxed">{inc.description}</span>
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-green-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                              </a>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="p-4 border border-dashed border-gray-200 rounded-2xl flex items-center justify-center">
-                            <p className="text-gray-300 italic text-[10px] uppercase font-black">No Income for this month</p>
-                          </div>
-                        )}
-                      </div>
+                {year.Months.length > 0 ? (
+                  year.Months.map((month) => (
+                    <AccordionItem key={month.month} title={month.month} depth={1} defaultOpen={false}>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 py-2">
+                        {/* Income Section */}
+                        <div>
+                          <h5 className="flex items-center text-green-700 font-black mb-4 uppercase text-[10px] tracking-widest">
+                            <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
+                            Income
+                          </h5>
+                          {month.details.noIncome ? (
+                            <div className="p-4 bg-green-50/50 border border-green-200 rounded-2xl flex items-center justify-center gap-2">
+                              <span className="text-green-600 font-extrabold">✓</span>
+                              <p className="text-green-700 italic text-[10px] uppercase font-black tracking-wide">Marked as No Income by Admin</p>
+                            </div>
+                          ) : month.details.Income.length > 0 ? (
+                            <div className="space-y-3">
+                              {month.details.Income.map((inc, iIdx) => (
+                                <a 
+                                  key={iIdx} 
+                                  href={inc.pdfUrl} 
+                                  target="_blank" 
+                                  rel="noreferrer" 
+                                  className="group block p-4 bg-green-50/30 rounded-2xl border border-green-100 hover:bg-green-100/50 transition-all shadow-sm flex items-center justify-between"
+                                >
+                                  <span className="text-xs font-bold text-green-900 group-hover:text-green-700 leading-relaxed">{inc.description}</span>
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-green-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                </a>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="p-4 border border-dashed border-gray-200 rounded-2xl flex items-center justify-center">
+                              <p className="text-gray-300 italic text-[10px] uppercase font-black">No Income for this month</p>
+                            </div>
+                          )}
+                        </div>
 
-                      {/* Expenditure Section */}
-                      <div>
-                        <h5 className="flex items-center text-red-700 font-black mb-4 uppercase text-[10px] tracking-widest">
-                          <span className="w-2 h-2 bg-red-500 rounded-full mr-2"></span>
-                          Expenditure
-                        </h5>
-                        {month.details.Expenditure.length > 0 ? (
-                          <div className="space-y-3">
-                            {month.details.Expenditure.map((exp, eIdx) => (
-                              <a 
-                                key={eIdx} 
-                                href={exp.pdfUrl} 
-                                target="_blank" 
-                                rel="noreferrer" 
-                                className="group block p-4 bg-red-50/30 rounded-2xl border border-red-100 hover:bg-red-100/50 transition-all shadow-sm flex items-center justify-between"
-                              >
-                                <span className="text-xs font-bold text-red-900 group-hover:text-red-700 leading-relaxed">{exp.description}</span>
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
-                              </a>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="p-4 border border-dashed border-gray-200 rounded-2xl flex items-center justify-center">
-                            <p className="text-gray-300 italic text-[10px] uppercase font-black">No Expenses for this month</p>
-                          </div>
-                        )}
+                        {/* Expenditure Section */}
+                        <div>
+                          <h5 className="flex items-center text-red-700 font-black mb-4 uppercase text-[10px] tracking-widest">
+                            <span className="w-2 h-2 bg-red-500 rounded-full mr-2"></span>
+                            Expenditure
+                          </h5>
+                          {month.details.noExpenditure ? (
+                            <div className="p-4 bg-red-50/50 border border-red-200 rounded-2xl flex items-center justify-center gap-2">
+                              <span className="text-red-600 font-extrabold">✓</span>
+                              <p className="text-red-700 italic text-[10px] uppercase font-black tracking-wide">Marked as No Expenditure by Admin</p>
+                            </div>
+                          ) : month.details.Expenditure.length > 0 ? (
+                            <div className="space-y-3">
+                              {month.details.Expenditure.map((exp, eIdx) => (
+                                <a 
+                                  key={eIdx} 
+                                  href={exp.pdfUrl} 
+                                  target="_blank" 
+                                  rel="noreferrer" 
+                                  className="group block p-4 bg-red-50/30 rounded-2xl border border-red-100 hover:bg-red-100/50 transition-all shadow-sm flex items-center justify-between"
+                                >
+                                  <span className="text-xs font-bold text-red-900 group-hover:text-red-700 leading-relaxed">{exp.description}</span>
+                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                </a>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="p-4 border border-dashed border-gray-200 rounded-2xl flex items-center justify-center">
+                              <p className="text-gray-300 italic text-[10px] uppercase font-black">No Expenses for this month</p>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </AccordionItem>
-                ))}
+                    </AccordionItem>
+                  ))
+                ) : (
+                  <div className="p-8 border border-dashed border-gray-200 rounded-2xl flex items-center justify-center bg-white">
+                    <p className="text-gray-400 italic text-xs uppercase font-bold tracking-wider">No transaction records logged for this financial year yet</p>
+                  </div>
+                )}
               </div>
             </AccordionItem>
           ))}

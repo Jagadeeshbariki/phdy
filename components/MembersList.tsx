@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import aboutConfigData from '../public/AboutConfig.json';
 
 // Syncing with the URL from AdminPage.tsx
 const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
@@ -13,11 +14,8 @@ const MembersList: React.FC = () => {
       try {
         setLoading(true);
         
-        // 1. Fetch static legacy members from local config
-        const localRes = await fetch(`/AboutConfig.json?v=${Date.now()}`);
-        if (!localRes.ok) throw new Error('Failed to load local members');
-        const localData = await localRes.json();
-        const config = Array.isArray(localData) ? localData[0] : localData;
+        // 1. Get static legacy members from statically imported local config
+        const config = Array.isArray(aboutConfigData) ? aboutConfigData[0] : aboutConfigData;
         const legacyMembers = config?.members || [];
 
         // 2. Fetch new members from Google Spreadsheet with a timeout
@@ -30,7 +28,17 @@ const MembersList: React.FC = () => {
             const spreadRes = await fetch(`${SPREADSHEET_API_URL}?type=members`, { signal: controller.signal });
             clearTimeout(timeoutId);
             
-            const spreadData = await spreadRes.json();
+            const text = await spreadRes.text();
+            let spreadData = [];
+            if (text.trim().startsWith('<')) {
+              console.warn("Spreadsheet API returned HTML instead of JSON for members. Check the Apps Script deployment.");
+            } else {
+              try {
+                spreadData = JSON.parse(text);
+              } catch (e) {
+                console.warn("Failed to parse members data as JSON:", e);
+              }
+            }
             spreadsheetMembers = Array.isArray(spreadData) ? spreadData : [];
           } catch (e) {
             console.warn("Spreadsheet API fetch failed or timed out, showing legacy data only.", e);

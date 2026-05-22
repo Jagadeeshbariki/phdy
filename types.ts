@@ -37,3 +37,26 @@ export interface SocialMedia {
   url: string;
   icon: string;
 }
+
+export function getCurrentFinancialYear(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth(); // 0-indexed, April is 3
+  if (month >= 3) {
+    return `${year}-${(year + 1).toString().slice(-2)}`;
+  } else {
+    return `${year - 1}-${year.toString().slice(-2)}`;
+  }
+}
+
+export function getFinancialYearsList(startYear: number = 2024): string[] {
+  const currentFY = getCurrentFinancialYear();
+  const [currentStartYearStr] = currentFY.split('-');
+  const currentStartYear = parseInt(currentStartYearStr, 10);
+  
+  const years: string[] = [];
+  for (let y = startYear; y <= currentStartYear; y++) {
+    years.push(`${y}-${(y + 1).toString().slice(-2)}`);
+  }
+  return years;
+}

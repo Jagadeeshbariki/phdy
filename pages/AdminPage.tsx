@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { LoggedInUser } from '../App';
+import { getCurrentFinancialYear, getFinancialYearsList } from '../types';
 
 const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
 const CLOUDINARY_CLOUD_NAME = 'dbohmpxko';
@@ -21,7 +22,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
 
   // Form states
   const [memberFormData, setMemberFormData] = useState({ Name: '', Age: '', Qualification: '', Motivation: '', IdNo: '' });
-  const [accountingFormData, setAccountingFormData] = useState({ FinancialYear: '2024-25', Month: 'January', Type: 'Expenditure', Description: '', BillLink: '' });
+  const [accountingFormData, setAccountingFormData] = useState({ FinancialYear: getCurrentFinancialYear(), Month: 'January', Type: 'Expenditure', Description: '', BillLink: '' });
   const [worksFormData, setWorksFormData] = useState({ title: '', date: '', description: '', youtubeLink: '' });
   
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -37,6 +38,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
   const [spreadsheetAccounting, setSpreadsheetAccounting] = useState<any[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletingAccountingDesc, setDeletingAccountingDesc] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const workPhotosRef = useRef<HTMLInputElement>(null);
   const workDocsRef = useRef<HTMLInputElement>(null);
@@ -46,10 +48,20 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     setIsRefreshing(true);
     try {
       const res = await fetch(`${SPREADSHEET_API_URL}?type=members`);
-      const data = await res.json();
+      const text = await res.text();
+      let data = [];
+      if (text.trim().startsWith('<')) {
+        console.warn("Spreadsheet API returned HTML instead of JSON. Check the Apps Script deployment.");
+      } else {
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          console.warn("Failed to parse members data as JSON:", e);
+        }
+      }
       setSpreadsheetMembers(Array.isArray(data) ? data : []);
     } catch (e) {
-      console.error("Failed to fetch members:", e);
+      console.warn("Failed to fetch members:", e);
     } finally {
       setIsRefreshing(false);
     }
@@ -60,10 +72,20 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     setIsRefreshing(true);
     try {
       const res = await fetch(`${SPREADSHEET_API_URL}?type=accounting`);
-      const data = await res.json();
+      const text = await res.text();
+      let data = [];
+      if (text.trim().startsWith('<')) {
+        console.warn("Spreadsheet API returned HTML instead of JSON. Check the Apps Script deployment.");
+      } else {
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          console.warn("Failed to parse accounting data as JSON:", e);
+        }
+      }
       setSpreadsheetAccounting(Array.isArray(data) ? data : []);
     } catch (e) {
-      console.error("Failed to fetch accounting:", e);
+      console.warn("Failed to fetch accounting:", e);
     } finally {
       setIsRefreshing(false);
     }
@@ -74,10 +96,20 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     setIsRefreshing(true);
     try {
       const res = await fetch(`${SPREADSHEET_API_URL}?type=works`);
-      const data = await res.json();
+      const text = await res.text();
+      let data = [];
+      if (text.trim().startsWith('<')) {
+        console.warn("Spreadsheet API returned HTML instead of JSON. Check the Apps Script deployment.");
+      } else {
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          console.warn("Failed to parse works data as JSON:", e);
+        }
+      }
       setSpreadsheetWorks(Array.isArray(data) ? data : []);
     } catch (e) {
-      console.error("Failed to fetch works:", e);
+      console.warn("Failed to fetch works:", e);
     } finally {
       setIsRefreshing(false);
     }
@@ -97,12 +129,22 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     setIsLoggingIn(true);
     try {
       const res = await fetch(`${SPREADSHEET_API_URL}?type=users`);
-      const users = await res.json();
+      const text = await res.text();
+      let users = [];
+      if (text.trim().startsWith('<')) {
+        console.warn("Spreadsheet API returned HTML indeed of JSON for users. Check the Apps Script deployment.");
+      } else {
+        try {
+          users = JSON.parse(text);
+        } catch (err) {
+          console.warn("Failed to parse users data as JSON:", err);
+        }
+      }
       
-      const user = users.find((u: any) => 
+      const user = Array.isArray(users) ? users.find((u: any) => 
         u.username.toLowerCase() === loginData.username.toLowerCase() && 
         u.password === loginData.password
-      );
+      ) : null;
 
       if (user) {
         onLoginSuccess({ username: user.username, role: user.role.toLowerCase() as any });
@@ -158,16 +200,33 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     e.preventDefault();
     if (loggedInUser?.role !== 'admin') return alert("Admin access required.");
     setStatus('submitting');
+
+    const finalPayload = { ...accountingFormData };
+    if (finalPayload.Type === 'No Income' || finalPayload.Type === 'No Expenditure') {
+      if (!finalPayload.Description.trim()) {
+        finalPayload.Description = finalPayload.Type === 'No Income' 
+          ? 'No income recorded for this month' 
+          : 'No expenditure recorded for this month';
+      }
+      if (!finalPayload.BillLink.trim() || finalPayload.BillLink === '#') {
+        finalPayload.BillLink = 'none';
+      }
+    }
+
     try {
       await fetch(SPREADSHEET_API_URL, {
         method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'add_accounting', ...accountingFormData }),
+        body: JSON.stringify({ action: 'add_accounting', ...finalPayload }),
       });
       setStatus('success');
+      alert("Submitted successfully!");
       setAccountingFormData({ ...accountingFormData, Description: '', BillLink: '' });
       fetchSpreadsheetAccounting();
       setTimeout(() => setStatus('idle'), 3000);
-    } catch (err) { setStatus('error'); }
+    } catch (err) { 
+      setStatus('error');
+      alert("Submission failed. Try again.");
+    }
   };
 
   const handleWorksSubmit = async (e: React.FormEvent) => {
@@ -215,14 +274,24 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
 
   const handleDeleteAccounting = async (description: string) => {
     if (!window.confirm(`Are you sure you want to delete this accounting entry: "${description}"?`)) return;
+    setDeletingAccountingDesc(description);
     setStatus('submitting');
     try {
       await fetch(SPREADSHEET_API_URL, {
         method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'delete_accounting', description: description }),
       });
-      setTimeout(() => { fetchSpreadsheetAccounting(); setStatus('idle'); }, 1500);
-    } catch (err) { setStatus('error'); }
+      alert("Deleted successfully!");
+      setTimeout(() => { 
+        fetchSpreadsheetAccounting(); 
+        setDeletingAccountingDesc(null);
+        setStatus('idle'); 
+      }, 1500);
+    } catch (err) { 
+      setStatus('error'); 
+      setDeletingAccountingDesc(null);
+      alert("Failed to delete financial record.");
+    }
   };
 
   const handleDeleteWork = async (title: string) => {
@@ -479,17 +548,69 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                 <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tight mb-8">Village Financial Entry</h2>
                 <form onSubmit={handleAccountingSubmit} className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <select className="px-6 py-4 rounded-2xl bg-gray-50" value={accountingFormData.FinancialYear} onChange={(e)=>setAccountingFormData({...accountingFormData, FinancialYear: e.target.value})}><option>2024-25</option><option>2025-26</option></select>
+                    <select className="px-6 py-4 rounded-2xl bg-gray-50 font-bold" value={accountingFormData.FinancialYear} onChange={(e)=>setAccountingFormData({...accountingFormData, FinancialYear: e.target.value})}>
+                      {getFinancialYearsList().map(y => (
+                        <option key={y} value={y}>{y} FY</option>
+                      ))}
+                    </select>
                     <select className="px-6 py-4 rounded-2xl bg-gray-50" value={accountingFormData.Month} onChange={(e)=>setAccountingFormData({...accountingFormData, Month: e.target.value})}>{['January','February','March','April','May','June','July','August','September','October','November','December'].map(m=><option key={m}>{m}</option>)}</select>
                   </div>
-                  <div className="flex gap-4">
-                    {['Income','Expenditure'].map(t=>(
-                      <button type="button" key={t} onClick={()=>setAccountingFormData({...accountingFormData, Type: t})} className={`flex-1 py-4 rounded-2xl border-2 font-black uppercase ${accountingFormData.Type === t ? 'bg-orange-600 text-white border-orange-600' : 'bg-gray-50 text-gray-400 border-gray-100'}`}>{t}</button>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    {['Income', 'Expenditure', 'No Income', 'No Expenditure'].map(t => (
+                      <button 
+                        type="button" 
+                        key={t} 
+                        onClick={() => {
+                          setAccountingFormData({
+                            ...accountingFormData, 
+                            Type: t,
+                            Description: (t === 'No Income' || t === 'No Expenditure') ? '' : accountingFormData.Description,
+                            BillLink: (t === 'No Income' || t === 'No Expenditure') ? '#' : (accountingFormData.BillLink === '#' ? '' : accountingFormData.BillLink)
+                          });
+                        }} 
+                        className={`py-3 px-2 rounded-2xl border-2 font-black text-xs uppercase text-center transition-all ${
+                          accountingFormData.Type === t 
+                            ? t.startsWith('No') 
+                              ? 'bg-amber-600 text-white border-amber-600' 
+                              : 'bg-orange-600 text-white border-orange-600' 
+                            : 'bg-gray-50 text-gray-400 border-gray-100 hover:bg-gray-100'
+                        }`}
+                      >
+                        {t}
+                      </button>
                     ))}
                   </div>
-                  <input required type="text" placeholder="Description" className="w-full px-6 py-4 rounded-2xl bg-gray-50" value={accountingFormData.Description} onChange={(e)=>setAccountingFormData({...accountingFormData, Description: e.target.value})} />
-                  <input required type="url" placeholder="Official Link (Bill/Receipt)" className="w-full px-6 py-4 rounded-2xl bg-gray-50" value={accountingFormData.BillLink} onChange={(e)=>setAccountingFormData({...accountingFormData, BillLink: e.target.value})} />
-                  <button type="submit" className="w-full py-5 bg-gray-900 text-white rounded-2xl font-black uppercase tracking-widest">Log Financial Record</button>
+                  
+                  {(accountingFormData.Type === 'No Income' || accountingFormData.Type === 'No Expenditure') ? (
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-amber-800 text-xs font-bold leading-relaxed">
+                      💡 You are marking this month as having <span className="font-black underline">{accountingFormData.Type}</span>. Custom description and official bill link fields are optional and will default to compliance values if left empty.
+                    </div>
+                  ) : null}
+
+                  <input 
+                    required={!(accountingFormData.Type === 'No Income' || accountingFormData.Type === 'No Expenditure')} 
+                    type="text" 
+                    placeholder={(accountingFormData.Type === 'No Income' || accountingFormData.Type === 'No Expenditure') ? "Custom Description / Note (Optional)" : "Description"} 
+                    className="w-full px-6 py-4 rounded-2xl bg-gray-50" 
+                    value={accountingFormData.Description} 
+                    onChange={(e)=>setAccountingFormData({...accountingFormData, Description: e.target.value})} 
+                  />
+                  
+                  <input 
+                    required={!(accountingFormData.Type === 'No Income' || accountingFormData.Type === 'No Expenditure')} 
+                    type={(accountingFormData.Type === 'No Income' || accountingFormData.Type === 'No Expenditure') ? "text" : "url"} 
+                    placeholder={(accountingFormData.Type === 'No Income' || accountingFormData.Type === 'No Expenditure') ? "Official Link (Optional, defaults to 'none')" : "Official Link (Bill/Receipt URL)"} 
+                    className="w-full px-6 py-4 rounded-2xl bg-gray-50" 
+                    value={accountingFormData.BillLink === '#' ? '' : accountingFormData.BillLink} 
+                    onChange={(e)=>setAccountingFormData({...accountingFormData, BillLink: e.target.value || '#'})} 
+                  />
+                  
+                  <button type="submit" disabled={status === 'submitting'} className="w-full py-5 bg-gray-900 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-orange-600 transition-all disabled:opacity-50">
+                    {status === 'submitting' 
+                      ? 'Submitting...' 
+                      : (accountingFormData.Type.startsWith('No') ? `Confirm ${accountingFormData.Type} Status` : "Log Financial Record")
+                    }
+                  </button>
                 </form>
               </div>
 
@@ -516,17 +637,24 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                           <td className="py-4 text-sm font-bold text-gray-500">{a.FinancialYear}</td>
                           <td className="py-4 text-sm font-bold text-gray-500">{a.Month}</td>
                           <td className="py-4">
-                            <span className={`px-2 py-1 rounded text-[9px] font-black uppercase ${a.Type === 'Income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                            <span className={`px-2 py-1 rounded text-[9px] font-black uppercase ${
+                              a.Type === 'Income' 
+                                ? 'bg-green-100 text-green-700' 
+                                : a.Type === 'Expenditure' 
+                                  ? 'bg-red-100 text-red-700' 
+                                  : 'bg-amber-100 text-amber-700'
+                            }`}>
                               {a.Type}
                             </span>
                           </td>
                           <td className="py-4 font-bold text-sm truncate max-w-[200px]">{a.Description}</td>
                           <td className="py-4 text-right">
                             <button 
+                              disabled={deletingAccountingDesc !== null}
                               onClick={() => handleDeleteAccounting(a.Description)}
-                              className="text-red-500 font-bold hover:underline text-xs"
+                              className="text-red-500 font-bold hover:underline text-xs disabled:opacity-50"
                             >
-                              Delete
+                              {deletingAccountingDesc === a.Description ? 'Deleting...' : 'Delete'}
                             </button>
                           </td>
                         </tr>
