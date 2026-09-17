@@ -6,7 +6,7 @@ const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLv
 const CLOUDINARY_CLOUD_NAME = 'dbohmpxko';
 const CLOUDINARY_UPLOAD_PRESET = 'phdy_preset'; 
 
-type AdminTab = 'members' | 'accounting' | 'works';
+type AdminTab = 'members' | 'accounting' | 'works' | 'joinRequests' | 'users';
 
 interface AdminPageProps {
   loggedInUser: LoggedInUser | null;
@@ -16,9 +16,11 @@ interface AdminPageProps {
 
 const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onLogout }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>('members');
-  const [loginData, setLoginData] = useState({ username: '', password: '' });
-  const [loginError, setLoginError] = useState('');
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot' | 'reset'>('login');
+  const [loginData, setLoginData] = useState({ name: '', email: '', password: '', otp: '', newPassword: '' });
+  const [authError, setAuthError] = useState('');
+  const [authSuccess, setAuthSuccess] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   // Form states
   const [memberFormData, setMemberFormData] = useState({ Name: '', Age: '', Qualification: '', Motivation: '', IdNo: '' });
@@ -36,9 +38,17 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
   const [spreadsheetMembers, setSpreadsheetMembers] = useState<any[]>([]);
   const [spreadsheetWorks, setSpreadsheetWorks] = useState<any[]>([]);
   const [spreadsheetAccounting, setSpreadsheetAccounting] = useState<any[]>([]);
+  const [spreadsheetJoinRequests, setSpreadsheetJoinRequests] = useState<any[]>([]);
+  const [spreadsheetUsers, setSpreadsheetUsers] = useState<any[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingAccountingDesc, setDeletingAccountingDesc] = useState<string | null>(null);
+  const [processingRequest, setProcessingRequest] = useState<string | null>(null);
+  const [showResetPopup, setShowResetPopup] = useState(false);
+  const [resetPopupState, setResetPopupState] = useState<'idle' | 'sending_otp' | 'awaiting_otp' | 'resetting' | 'success'>('idle');
+  const [resetData, setResetData] = useState({ otp: '', newPassword: '' });
+  const [resetError, setResetError] = useState('');
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const workPhotosRef = useRef<HTMLInputElement>(null);
   const workDocsRef = useRef<HTMLInputElement>(null);
@@ -115,46 +125,137 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     }
   };
 
+  const fetchSpreadsheetJoinRequests = async () => {
+    if (!SPREADSHEET_API_URL || !loggedInUser || loggedInUser.role !== 'admin') return;
+    setIsRefreshing(true);
+    try {
+      const res = await fetch(`${SPREADSHEET_API_URL}?type=join_requests`);
+      const text = await res.text();
+      let data = [];
+      if (text.trim().startsWith('<')) {
+        console.warn("Spreadsheet API returned HTML instead of JSON. Check the Apps Script deployment.");
+      } else {
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          console.warn("Failed to parse join requests data as JSON:", e);
+        }
+      }
+      setSpreadsheetJoinRequests(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.warn("Failed to fetch join requests:", e);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const fetchSpreadsheetUsers = async () => {
+    if (!SPREADSHEET_API_URL || !loggedInUser || loggedInUser.role !== 'admin') return;
+    setIsRefreshing(true);
+    try {
+      const res = await fetch(`${SPREADSHEET_API_URL}?type=users`);
+      const text = await res.text();
+      let data = [];
+      if (!text.trim().startsWith('<')) {
+        try { data = JSON.parse(text); } catch (e) {}
+      }
+      setSpreadsheetUsers(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.warn("Failed to fetch users:", e);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const handlePromoteUser = async (email: string) => {
+    if (!window.confirm(`Are you sure you want to promote ${email} to Admin?`)) return;
+    setStatus('submitting');
+    try {
+      await fetch(SPREADSHEET_API_URL, {
+        method: 'POST', 
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'promote_user',
+          email: email
+        })
+      });
+      alert(`Promoted ${email} to Admin!`);
+      fetchSpreadsheetUsers();
+    } catch (err) {
+      alert("Failed to promote user.");
+    } finally {
+      setStatus('idle');
+    }
+  };
+
   useEffect(() => {
     if (loggedInUser) {
       if (activeTab === 'members') fetchSpreadsheetMembers();
       if (activeTab === 'works') fetchSpreadsheetWorks();
       if (activeTab === 'accounting') fetchSpreadsheetAccounting();
+      if (activeTab === 'joinRequests') fetchSpreadsheetJoinRequests();
+      if (activeTab === 'users') fetchSpreadsheetUsers();
     }
   }, [activeTab, loggedInUser]);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleAuthAction = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoginError('');
-    setIsLoggingIn(true);
+    setAuthError('');
+    setAuthSuccess('');
+    setIsAuthenticating(true);
     try {
-      const res = await fetch(`${SPREADSHEET_API_URL}?type=users`);
-      const text = await res.text();
-      let users = [];
-      if (text.trim().startsWith('<')) {
-        console.warn("Spreadsheet API returned HTML indeed of JSON for users. Check the Apps Script deployment.");
-      } else {
-        try {
-          users = JSON.parse(text);
-        } catch (err) {
-          console.warn("Failed to parse users data as JSON:", err);
+      let action = '';
+      if (authMode === 'login') action = 'login';
+      else if (authMode === 'register') action = 'register';
+      else if (authMode === 'forgot') action = 'request_otp';
+      else if (authMode === 'reset') action = 'reset_password';
+
+      // Use text/plain to avoid CORS preflight while still sending JSON string
+      const res = await fetch(SPREADSHEET_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: action,
+          name: loginData.name || '',
+          email: loginData.email,
+          password: loginData.password,
+          newPassword: loginData.newPassword,
+          otp: loginData.otp
+        })
+      });
+
+      const responseText = await res.text();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (err) {
+        if (responseText.includes("MailApp") || responseText.includes("permission")) {
+          throw new Error("Apps Script requires Email permissions. Go to your script, run 'setupFirstAdmin' to trigger the authorization prompt, then Deploy as a NEW VERSION.");
         }
+        throw new Error("Invalid response from server. Check deployment.");
       }
       
-      const user = Array.isArray(users) ? users.find((u: any) => 
-        u.username.toLowerCase() === loginData.username.toLowerCase() && 
-        u.password === loginData.password
-      ) : null;
-
-      if (user) {
-        onLoginSuccess({ username: user.username, role: user.role.toLowerCase() as any });
+      if (data.status === 'success') {
+        if (authMode === 'login') {
+          onLoginSuccess({ email: data.user.email, role: data.user.role });
+        } else if (authMode === 'register') {
+          setAuthSuccess('Registration successful. An admin must approve your access before logging in.');
+          setAuthMode('login');
+        } else if (authMode === 'forgot') {
+          setAuthSuccess('An OTP has been sent to your email.');
+          setAuthMode('reset');
+        } else if (authMode === 'reset') {
+          setAuthSuccess('Password reset successfully. You can now login.');
+          setAuthMode('login');
+        }
       } else {
-        setLoginError('Invalid username or password.');
+        setAuthError(data.message || 'Authentication failed.');
       }
-    } catch (err) {
-      setLoginError('Connection failed. Please check your internet.');
+    } catch (err: any) {
+      console.error(err);
+      setAuthError(`Connection failed: ${err.message || 'Make sure you deployed the new Google Apps Script version.'}`);
     } finally {
-      setIsLoggingIn(false);
+      setIsAuthenticating(false);
     }
   };
 
@@ -186,7 +287,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       const cloudinaryData = await uploadToCloudinary(selectedFile, 'image');
       setStatus('submitting');
       await fetch(SPREADSHEET_API_URL, {
-        method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: 'add', ...memberFormData, "Id.No": memberFormData.IdNo, ImageURL: cloudinaryData.secure_url }),
       });
       setStatus('success');
@@ -215,7 +316,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
 
     try {
       await fetch(SPREADSHEET_API_URL, {
-        method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: 'add_accounting', ...finalPayload }),
       });
       setStatus('success');
@@ -251,7 +352,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
 
       setStatus('submitting');
       await fetch(SPREADSHEET_API_URL, {
-        method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ 
           action: 'add_work', 
           ...worksFormData,
@@ -278,7 +379,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     setStatus('submitting');
     try {
       await fetch(SPREADSHEET_API_URL, {
-        method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: 'delete_accounting', description: description }),
       });
       alert("Deleted successfully!");
@@ -299,7 +400,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     setStatus('submitting');
     try {
       await fetch(SPREADSHEET_API_URL, {
-        method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: 'delete_work', title: title }),
       });
       setTimeout(() => { fetchSpreadsheetWorks(); setStatus('idle'); }, 1500);
@@ -310,10 +411,153 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     if (!window.confirm(`Are you sure you want to delete member ID ${id}?`)) return;
     setDeletingId(id);
     await fetch(SPREADSHEET_API_URL, {
-      method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'delete', id: id }),
     });
     setTimeout(() => { fetchSpreadsheetMembers(); setDeletingId(null); }, 1500);
+  };
+
+  const handleApproveJoinRequest = async (req: any) => {
+    let finalEmail = req.email;
+    if (!finalEmail) {
+      finalEmail = window.prompt(`Missing email for ${req.fullName}. Please enter their email address to proceed:`);
+      if (!finalEmail) return; // User cancelled
+    }
+    if (!window.confirm(`Are you sure you want to APPROVE ${req.fullName}? They will be added to the Members and Users lists.`)) return;
+    setProcessingRequest(req.fullName);
+    try {
+      const res = await fetch(SPREADSHEET_API_URL, {
+        method: 'POST', 
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'approve_join_request',
+          email: finalEmail,
+          fullName: req.fullName,
+          phone: req.phone,
+          dob: req.dob,
+          address: req.address,
+          reason: req.reason,
+          photoUrl: req.photoUrl || ''
+        })
+      });
+      
+      const responseText = await res.text();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        throw new Error("Server returned an invalid response. Ensure Apps Script is published as a New Version.");
+      }
+
+      if (data.status === 'success') {
+        alert(`Approved ${req.fullName}! A temporary password has been emailed to them.`);
+        fetchSpreadsheetJoinRequests();
+        fetchSpreadsheetMembers();
+        fetchSpreadsheetUsers();
+      } else {
+        throw new Error(data.message || "Failed to approve.");
+      }
+    } catch (err: any) {
+      alert(`Failed to approve join request: ${err.message}`);
+    } finally {
+      setProcessingRequest(null);
+    }
+  };
+
+  const handleRejectJoinRequest = async (req: any) => {
+    let finalEmail = req.email;
+    if (!finalEmail) {
+      finalEmail = window.prompt(`Missing email for ${req.fullName}. Please enter their email address to reject (required by server), or a placeholder like dummy@test.com:`);
+      if (!finalEmail) return;
+    }
+    if (!window.confirm(`Are you sure you want to REJECT and delete the request from ${req.fullName}?`)) return;
+    setProcessingRequest(req.fullName);
+    try {
+      const res = await fetch(SPREADSHEET_API_URL, {
+        method: 'POST', 
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'reject_join_request',
+          email: finalEmail
+        })
+      });
+      
+      const responseText = await res.text();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        throw new Error("Server returned an invalid response. Ensure Apps Script is published as a New Version.");
+      }
+
+      if (data.status === 'success') {
+        alert(`Rejected ${req.fullName}'s request.`);
+        fetchSpreadsheetJoinRequests();
+      } else {
+        throw new Error(data.message || "Failed to reject.");
+      }
+    } catch (err: any) {
+      alert(`Failed to reject join request: ${err.message}`);
+    } finally {
+      setProcessingRequest(null);
+    }
+  };
+
+  const handlePopupRequestOtp = async () => {
+    if (!loggedInUser) return;
+    setResetPopupState('sending_otp');
+    setResetError('');
+    try {
+      const res = await fetch(SPREADSHEET_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'request_otp', email: loggedInUser.email })
+      });
+      const data = JSON.parse(await res.text());
+      if (data.status === 'success') {
+        setResetPopupState('awaiting_otp');
+      } else {
+        setResetError(data.message || 'Failed to send OTP.');
+        setResetPopupState('idle');
+      }
+    } catch (err) {
+      setResetError('Connection failed.');
+      setResetPopupState('idle');
+    }
+  };
+
+  const handlePopupResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loggedInUser) return;
+    setResetPopupState('resetting');
+    setResetError('');
+    try {
+      const res = await fetch(SPREADSHEET_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'reset_password',
+          email: loggedInUser.email,
+          otp: resetData.otp,
+          newPassword: resetData.newPassword
+        })
+      });
+      const data = JSON.parse(await res.text());
+      if (data.status === 'success') {
+        setResetPopupState('success');
+        setTimeout(() => {
+          setShowResetPopup(false);
+          setResetPopupState('idle');
+          setResetData({ otp: '', newPassword: '' });
+        }, 2000);
+      } else {
+        setResetError(data.message || 'Failed to reset password.');
+        setResetPopupState('awaiting_otp');
+      }
+    } catch (err) {
+      setResetError('Connection failed.');
+      setResetPopupState('awaiting_otp');
+    }
   };
 
   if (!loggedInUser) {
@@ -324,48 +568,96 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
             <div className="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <img src="https://res.cloudinary.com/dbohmpxko/image/upload/v1729417549/LogoWithoutBG_qzoqus.png" alt="Logo" className="w-10 h-10 object-contain" />
             </div>
-            <h1 className="text-3xl font-black text-gray-900 uppercase tracking-tight mb-2">Admin Login</h1>
+            <h1 className="text-3xl font-black text-gray-900 uppercase tracking-tight mb-2">
+              {authMode === 'login' ? 'Portal Login' : 
+               authMode === 'forgot' ? 'Forgot Password' : 'Reset Password'}
+            </h1>
             <p className="text-gray-400 font-bold text-[10px] uppercase tracking-widest">Village Governance Access</p>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-6">
+          <form onSubmit={handleAuthAction} className="space-y-6">
             <div>
-              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Username</label>
+              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Email Address</label>
               <input 
                 required
-                type="text" 
+                type="email" 
                 className="w-full px-6 py-4 rounded-2xl bg-gray-50 border border-gray-100 outline-none focus:ring-4 focus:ring-orange-100 font-bold transition-all"
-                placeholder="Admin Username"
-                value={loginData.username}
-                onChange={(e) => setLoginData({...loginData, username: e.target.value})}
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Password</label>
-              <input 
-                required
-                type="password" 
-                className="w-full px-6 py-4 rounded-2xl bg-gray-50 border border-gray-100 outline-none focus:ring-4 focus:ring-orange-100 font-bold transition-all"
-                placeholder="••••••••"
-                value={loginData.password}
-                onChange={(e) => setLoginData({...loginData, password: e.target.value})}
+                placeholder="admin@example.com"
+                value={loginData.email}
+                onChange={(e) => setLoginData({...loginData, email: e.target.value})}
               />
             </div>
 
-            {loginError && (
+            {authMode === 'login' && (
+              <div>
+                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Password</label>
+                <input 
+                  required
+                  type="password" 
+                  className="w-full px-6 py-4 rounded-2xl bg-gray-50 border border-gray-100 outline-none focus:ring-4 focus:ring-orange-100 font-bold transition-all"
+                  placeholder="••••••••"
+                  value={loginData.password}
+                  onChange={(e) => setLoginData({...loginData, password: e.target.value})}
+                />
+              </div>
+            )}
+
+            {authMode === 'reset' && (
+              <>
+                <div>
+                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">OTP (from email)</label>
+                  <input 
+                    required
+                    type="text" 
+                    className="w-full px-6 py-4 rounded-2xl bg-gray-50 border border-gray-100 outline-none focus:ring-4 focus:ring-orange-100 font-bold transition-all"
+                    placeholder="123456"
+                    value={loginData.otp}
+                    onChange={(e) => setLoginData({...loginData, otp: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">New Password</label>
+                  <input 
+                    required
+                    type="password" 
+                    className="w-full px-6 py-4 rounded-2xl bg-gray-50 border border-gray-100 outline-none focus:ring-4 focus:ring-orange-100 font-bold transition-all"
+                    placeholder="••••••••"
+                    value={loginData.newPassword}
+                    onChange={(e) => setLoginData({...loginData, newPassword: e.target.value})}
+                  />
+                </div>
+              </>
+            )}
+
+            {authError && (
               <div className="p-4 bg-red-50 text-red-600 rounded-xl text-xs font-bold text-center border border-red-100 animate-pulse">
-                {loginError}
+                {authError}
+              </div>
+            )}
+            {authSuccess && (
+              <div className="p-4 bg-green-50 text-green-700 rounded-xl text-xs font-bold text-center border border-green-200">
+                {authSuccess}
               </div>
             )}
 
             <button 
-              disabled={isLoggingIn}
+              disabled={isAuthenticating}
               type="submit" 
               className="w-full py-5 bg-orange-600 hover:bg-orange-700 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-orange-200 transition-all active:scale-95 disabled:opacity-50"
             >
-              {isLoggingIn ? 'Authenticating...' : 'Secure Login'}
+              {isAuthenticating ? 'Processing...' : 
+               authMode === 'login' ? 'Secure Login' :
+               authMode === 'forgot' ? 'Send OTP' : 'Reset Password'}
             </button>
           </form>
+
+          <div className="mt-6 flex flex-col space-y-2 text-center">
+            {authMode === 'login' ? (
+              <button type="button" onClick={() => { setAuthMode('forgot'); setAuthError(''); setAuthSuccess(''); }} className="text-xs font-bold text-orange-600 hover:underline">Forgot Password?</button>
+            ) : (
+              <button type="button" onClick={() => { setAuthMode('login'); setAuthError(''); setAuthSuccess(''); }} className="text-xs font-bold text-orange-600 hover:underline">Back to Login</button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -380,19 +672,24 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
              </div>
              <div>
-               <h1 className="text-xl font-black text-gray-900 uppercase tracking-tight">Admin: {loggedInUser.username}</h1>
+               <h1 className="text-xl font-black text-gray-900 uppercase tracking-tight">Admin: {loggedInUser.email.split('@')[0]}</h1>
                <p className="text-[10px] font-black text-orange-600 uppercase tracking-[0.2em]">{loggedInUser.role === 'admin' ? 'System Administrator' : 'Group Member'}</p>
              </div>
           </div>
-          <button onClick={onLogout} className="px-6 py-3 bg-gray-100 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">Sign Out</button>
+          <div className="flex items-center space-x-2">
+            <button onClick={() => setShowResetPopup(true)} className="px-6 py-3 bg-gray-100 hover:bg-orange-50 text-gray-600 hover:text-orange-600 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">Change Password</button>
+            <button onClick={onLogout} className="px-6 py-3 bg-gray-100 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">Sign Out</button>
+          </div>
         </div>
 
-        <div className="flex justify-center space-x-4">
-          <button onClick={() => setActiveTab('members')} className={`px-8 py-3 rounded-xl font-black uppercase tracking-widest text-sm transition-all ${activeTab === 'members' ? 'bg-orange-600 text-white shadow-lg' : 'bg-white text-gray-400'}`}>Members</button>
+        <div className="flex justify-center space-x-4 overflow-x-auto pb-4">
+          <button onClick={() => setActiveTab('members')} className={`px-8 py-3 rounded-xl font-black uppercase tracking-widest text-sm transition-all whitespace-nowrap ${activeTab === 'members' ? 'bg-orange-600 text-white shadow-lg' : 'bg-white text-gray-400'}`}>Members</button>
           {loggedInUser.role === 'admin' && (
             <>
-              <button onClick={() => setActiveTab('works')} className={`px-8 py-3 rounded-xl font-black uppercase tracking-widest text-sm transition-all ${activeTab === 'works' ? 'bg-orange-600 text-white shadow-lg' : 'bg-white text-gray-400'}`}>Our Works</button>
-              <button onClick={() => setActiveTab('accounting')} className={`px-8 py-3 rounded-xl font-black uppercase tracking-widest text-sm transition-all ${activeTab === 'accounting' ? 'bg-gray-900 text-white shadow-lg' : 'bg-white text-gray-400'}`}>Accounting</button>
+              <button onClick={() => setActiveTab('works')} className={`px-8 py-3 rounded-xl font-black uppercase tracking-widest text-sm transition-all whitespace-nowrap ${activeTab === 'works' ? 'bg-orange-600 text-white shadow-lg' : 'bg-white text-gray-400'}`}>Our Works</button>
+              <button onClick={() => setActiveTab('accounting')} className={`px-8 py-3 rounded-xl font-black uppercase tracking-widest text-sm transition-all whitespace-nowrap ${activeTab === 'accounting' ? 'bg-gray-900 text-white shadow-lg' : 'bg-white text-gray-400'}`}>Accounting</button>
+              <button onClick={() => setActiveTab('joinRequests')} className={`px-8 py-3 rounded-xl font-black uppercase tracking-widest text-sm transition-all whitespace-nowrap ${activeTab === 'joinRequests' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-gray-400'}`}>Join Requests</button>
+              <button onClick={() => setActiveTab('users')} className={`px-8 py-3 rounded-xl font-black uppercase tracking-widest text-sm transition-all whitespace-nowrap ${activeTab === 'users' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-white text-gray-400'}`}>Manage Users</button>
             </>
           )}
         </div>
@@ -670,8 +967,187 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
               </div>
             </div>
           )}
+          {activeTab === 'joinRequests' && (
+            <div className="space-y-12 animate-fadeIn">
+              <div className="bg-white rounded-[40px] p-8 md:p-12 shadow-2xl border border-gray-100">
+                <div className="flex justify-between items-center mb-8">
+                  <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tight">Membership Join Requests</h2>
+                  <button onClick={fetchSpreadsheetJoinRequests} className="text-blue-600 font-bold">Sync Data</button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="border-b border-gray-100">
+                      <tr className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                        <th className="pb-4">Photo</th>
+                        <th className="pb-4">Details</th>
+                        <th className="pb-4">Address</th>
+                        <th className="pb-4">Reason</th>
+                        <th className="pb-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {spreadsheetJoinRequests.map((req, idx) => (
+                        <tr key={idx}>
+                          <td className="py-4 pr-4">
+                            {req.photoUrl ? (
+                              <img src={req.photoUrl} alt="Photo" className="w-16 h-16 object-cover rounded-xl" />
+                            ) : (
+                              <div className="w-16 h-16 bg-gray-100 rounded-xl flex items-center justify-center text-xs text-gray-400">N/A</div>
+                            )}
+                          </td>
+                          <td className="py-4 pr-4">
+                            <p className="font-bold text-gray-900">{req.fullName}</p>
+                            <p className="text-xs text-gray-500 font-medium">{req.email}</p>
+                            <p className="text-xs text-gray-500">Phone: {req.phone}</p>
+                            <p className="text-xs text-gray-500">DOB: {req.dob}</p>
+                          </td>
+                          <td className="py-4 pr-4 text-sm text-gray-600 max-w-[200px] break-words">
+                            {req.address}
+                          </td>
+                          <td className="py-4 text-sm text-gray-600 max-w-[200px] break-words pr-4">
+                            {req.reason}
+                          </td>
+                          <td className="py-4 text-right">
+                            <button
+                              disabled={processingRequest === req.fullName}
+                              onClick={() => handleApproveJoinRequest(req)}
+                              className="px-4 py-2 bg-green-100 text-green-700 hover:bg-green-600 hover:text-white rounded-lg text-xs font-bold uppercase transition-colors disabled:opacity-50"
+                            >
+                              {processingRequest === req.fullName ? 'Processing...' : 'Approve'}
+                            </button>
+                            <button
+                              disabled={processingRequest === req.fullName}
+                              onClick={() => handleRejectJoinRequest(req)}
+                              className="mt-2 px-4 py-2 bg-red-50 text-red-600 hover:bg-red-600 hover:text-white rounded-lg text-xs font-bold uppercase transition-colors ml-2 disabled:opacity-50"
+                            >
+                              Reject
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {spreadsheetJoinRequests.length === 0 && (
+                        <tr>
+                          <td colSpan={5} className="py-8 text-center text-gray-400 italic">No join requests found.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+          {activeTab === 'users' && loggedInUser.role === 'admin' && (
+            <div className="space-y-12 animate-fadeIn">
+              <div className="bg-white rounded-[40px] p-8 md:p-12 shadow-2xl border border-gray-100">
+                <div className="flex justify-between items-center mb-8">
+                  <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tight">System Users</h2>
+                  <button onClick={fetchSpreadsheetUsers} className="text-indigo-600 font-bold">Sync Data</button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="border-b border-gray-100">
+                      <tr className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                        <th className="pb-4">Name</th>
+                        <th className="pb-4">Email</th>
+                        <th className="pb-4">Role</th>
+                        <th className="pb-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {spreadsheetUsers.map((u, idx) => (
+                        <tr key={idx}>
+                          <td className="py-4 font-bold text-gray-900">{u.name}</td>
+                          <td className="py-4 text-sm text-gray-600">{u.email}</td>
+                          <td className="py-4">
+                            <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                              u.role === 'admin' ? 'bg-indigo-100 text-indigo-700' : 
+                              u.role === 'phdy_member' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-500'
+                            }`}>
+                              {u.role === 'phdy_member' ? 'Member' : u.role}
+                            </span>
+                          </td>
+                          <td className="py-4 text-right">
+                            {u.role !== 'admin' && (
+                              <button
+                                onClick={() => handlePromoteUser(u.email)}
+                                className="text-indigo-600 font-bold hover:underline text-xs"
+                              >
+                                Make Admin
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {spreadsheetUsers.length === 0 && (
+                        <tr>
+                          <td colSpan={4} className="py-8 text-center text-gray-400 italic">No users found.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+      
+      {showResetPopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-50 p-4">
+          <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl animate-fadeIn">
+            <h2 className="text-xl font-black uppercase text-gray-900 mb-4">Update Password</h2>
+            
+            {resetPopupState === 'idle' && (
+              <>
+                <p className="text-sm text-gray-500 mb-6">We will send a one-time password (OTP) to <b>{loggedInUser.email}</b> to verify it's you.</p>
+                <div className="flex space-x-3">
+                  <button onClick={() => setShowResetPopup(false)} className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold uppercase text-xs">Cancel</button>
+                  <button onClick={handlePopupRequestOtp} className="flex-1 py-3 bg-orange-600 text-white rounded-xl font-bold uppercase text-xs">Send OTP</button>
+                </div>
+              </>
+            )}
+
+            {resetPopupState === 'sending_otp' && (
+              <div className="py-8 text-center text-orange-600 font-bold animate-pulse">Sending OTP...</div>
+            )}
+
+            {(resetPopupState === 'awaiting_otp' || resetPopupState === 'resetting') && (
+              <form onSubmit={handlePopupResetPassword} className="space-y-4">
+                <input 
+                  required 
+                  placeholder="Enter 6-digit OTP" 
+                  type="text"
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl font-bold outline-none"
+                  value={resetData.otp}
+                  onChange={e => setResetData({...resetData, otp: e.target.value})}
+                />
+                <input 
+                  required 
+                  placeholder="New Password" 
+                  type="password"
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl font-bold outline-none"
+                  value={resetData.newPassword}
+                  onChange={e => setResetData({...resetData, newPassword: e.target.value})}
+                />
+                {resetError && <p className="text-xs text-red-600 font-bold">{resetError}</p>}
+                <div className="flex space-x-3 pt-2">
+                  <button type="button" onClick={() => {setShowResetPopup(false); setResetPopupState('idle');}} className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold uppercase text-xs">Cancel</button>
+                  <button type="submit" disabled={resetPopupState === 'resetting'} className="flex-1 py-3 bg-orange-600 text-white rounded-xl font-bold uppercase text-xs disabled:opacity-50">
+                    {resetPopupState === 'resetting' ? 'Saving...' : 'Update'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {resetPopupState === 'success' && (
+              <div className="py-8 text-center">
+                <div className="text-green-500 font-black mb-2 text-xl">SUCCESS!</div>
+                <p className="text-gray-500 text-sm">Your password has been updated.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

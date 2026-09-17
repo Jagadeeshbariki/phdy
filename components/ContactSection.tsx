@@ -1,50 +1,95 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { CONTACT_SOCIAL_LINKS } from '../ContactData';
+
+const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
+const CLOUDINARY_CLOUD_NAME = 'dbohmpxko';
+const CLOUDINARY_UPLOAD_PRESET = 'phdy_preset'; 
 
 const ContactSection: React.FC = () => {
   const [formData, setFormData] = useState({
     fullName: '',
-    age: '',
-    gender: '',
-    education: '',
+    email: '',
+    phone: '',
+    dob: '',
     address: '',
-    phone: ''
+    reason: ''
   });
+  
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Strictly accept only numbers
     const value = e.target.value.replace(/\D/g, '');
     if (value.length <= 10) {
       setFormData({ ...formData, phone: value });
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const uploadToCloudinary = async (file: File) => {
+    const data = new FormData();
+    data.append('file', file);
+    data.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+    data.append('resource_type', 'image');
+    
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/upload`, {
+      method: 'POST',
+      body: data
+    });
+    
+    if (!res.ok) {
+      throw new Error('Cloudinary upload failed');
+    }
+    return await res.json();
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Validate 10-digit phone number
     if (formData.phone.length !== 10) {
       alert("Please enter a valid 10-digit phone number.");
       return;
     }
+    if (!selectedFile) {
+      alert("Please upload your photo.");
+      return;
+    }
     
     setIsSubmitting(true);
-    // Simulation of data submission
-    setTimeout(() => {
+    try {
+      const cloudinaryData = await uploadToCloudinary(selectedFile);
+      
+      await fetch(SPREADSHEET_API_URL, {
+        method: 'POST', 
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ 
+          action: 'add_join_request', 
+          ...formData,
+          photoUrl: cloudinaryData.secure_url 
+        }),
+      });
+
       setIsSubmitting(false);
       setSubmitted(true);
       setFormData({
         fullName: '',
-        age: '',
-        gender: '',
-        education: '',
+        email: '',
+        phone: '',
+        dob: '',
         address: '',
-        phone: ''
+        reason: ''
       });
+      setSelectedFile(null);
+      setPreviewUrl(null);
       setTimeout(() => setSubmitted(false), 5000);
-    }, 1500);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to submit request. Please try again later.");
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -53,8 +98,8 @@ const ContactSection: React.FC = () => {
         {/* Registration Form */}
         <div className="bg-white rounded-[40px] p-8 md:p-12 shadow-2xl shadow-orange-100 border border-orange-50">
           <div className="mb-8">
-            <h3 className="text-3xl font-bold text-gray-900 mb-2">Member Registration</h3>
-            <p className="text-gray-500">Please provide your details to connect with the PHDY group.</p>
+            <h3 className="text-3xl font-bold text-gray-900 mb-2">Join Us</h3>
+            <p className="text-gray-500">Please provide your details to request joining the PHDY group.</p>
           </div>
 
           {submitted ? (
@@ -65,92 +110,128 @@ const ContactSection: React.FC = () => {
                 </svg>
               </div>
               <h4 className="text-xl font-bold mb-2">Thank You!</h4>
-              <p>Your details have been registered. Our team will contact you soon.</p>
+              <p>Your request has been submitted. Our admin team will review it soon.</p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="flex flex-col items-center mb-8">
+                <label className="block text-sm font-bold text-gray-700 mb-4 text-center w-full">Your Photo</label>
+                <div 
+                  onClick={() => fileInputRef.current?.click()} 
+                  className="w-32 h-32 rounded-full border-4 border-dashed border-gray-200 flex items-center justify-center overflow-hidden bg-gray-50 cursor-pointer hover:border-orange-300 transition-colors"
+                >
+                  {previewUrl ? (
+                    <img src={previewUrl} className="w-full h-full object-cover" alt="Preview" />
+                  ) : (
+                    <div className="text-center p-2">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 mx-auto text-gray-400 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      <span className="text-[10px] text-gray-500 font-bold uppercase block">Upload</span>
+                    </div>
+                  )}
+                </div>
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  className="hidden" 
+                  accept="image/*" 
+                  onChange={(e) => { 
+                    const f = e.target.files?.[0]; 
+                    if(f) { 
+                      setSelectedFile(f); 
+                      setPreviewUrl(URL.createObjectURL(f)); 
+                    } 
+                  }} 
+                />
+              </div>
+
               <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">Full Name</label>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Your full name</label>
                 <input
                   required
                   type="text"
                   className="w-full px-5 py-4 rounded-2xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-4 focus:ring-orange-100 focus:border-orange-500 transition-all outline-none font-medium"
-                  placeholder="Your Full Name"
+                  placeholder="Enter your name"
                   value={formData.fullName}
                   onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
                 />
               </div>
 
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Your email address</label>
+                <input
+                  required
+                  type="email"
+                  className="w-full px-5 py-4 rounded-2xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-4 focus:ring-orange-100 focus:border-orange-500 transition-all outline-none font-medium"
+                  placeholder="Enter your email"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                />
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Age</label>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Your phone number</label>
                   <input
                     required
-                    type="number"
+                    type="tel"
+                    maxLength={10}
                     className="w-full px-5 py-4 rounded-2xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-4 focus:ring-orange-100 focus:border-orange-500 transition-all outline-none font-medium"
-                    placeholder="Enter Age"
-                    value={formData.age}
-                    onChange={(e) => setFormData({ ...formData, age: e.target.value })}
+                    placeholder="10 digit number"
+                    value={formData.phone}
+                    onChange={handlePhoneChange}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Gender</label>
-                  <select
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Your date of birth</label>
+                  <input
                     required
-                    className="w-full px-5 py-4 rounded-2xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-4 focus:ring-orange-100 focus:border-orange-500 transition-all outline-none font-medium appearance-none"
-                    value={formData.gender}
-                    onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-                  >
-                    <option value="">Select Gender</option>
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                    <option value="Other">Other</option>
-                  </select>
+                    type="date"
+                    className="w-full px-5 py-4 rounded-2xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-4 focus:ring-orange-100 focus:border-orange-500 transition-all outline-none font-medium"
+                    value={formData.dob}
+                    onChange={(e) => setFormData({ ...formData, dob: e.target.value })}
+                  />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">Education Qualification</label>
-                <input
+                <label className="block text-sm font-bold text-gray-700 mb-2">Your address</label>
+                <textarea
                   required
-                  type="text"
-                  className="w-full px-5 py-4 rounded-2xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-4 focus:ring-orange-100 focus:border-orange-500 transition-all outline-none font-medium"
-                  placeholder="e.g., Graduate, B.Tech, etc."
-                  value={formData.education}
-                  onChange={(e) => setFormData({ ...formData, education: e.target.value })}
-                />
+                  className="w-full px-5 py-4 rounded-2xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-4 focus:ring-orange-100 focus:border-orange-500 transition-all outline-none font-medium min-h-[100px]"
+                  placeholder="Full address"
+                  value={formData.address}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                ></textarea>
               </div>
 
               <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">Phone Number (10 Digits)</label>
-                <input
-                  required
-                  type="tel"
-                  maxLength={10}
-                  className="w-full px-5 py-4 rounded-2xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-4 focus:ring-orange-100 focus:border-orange-500 transition-all outline-none font-medium"
-                  placeholder="Enter 10 Digit Number"
-                  value={formData.phone}
-                  onChange={handlePhoneChange}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">Address</label>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Why you want to join our group</label>
                 <textarea
                   required
                   className="w-full px-5 py-4 rounded-2xl border border-gray-100 bg-gray-50 focus:bg-white focus:ring-4 focus:ring-orange-100 focus:border-orange-500 transition-all outline-none font-medium min-h-[120px]"
-                  placeholder="Your Full Village Address"
-                  value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  placeholder="Explain your reason..."
+                  value={formData.reason}
+                  onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
                 ></textarea>
               </div>
 
               <button
                 disabled={isSubmitting}
                 type="submit"
-                className="w-full py-5 bg-orange-600 hover:bg-orange-700 text-white rounded-2xl font-bold shadow-xl shadow-orange-200 transition-all active:scale-95 disabled:opacity-50"
+                className="w-full py-5 bg-orange-600 hover:bg-orange-700 text-white rounded-2xl font-bold shadow-xl shadow-orange-200 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center"
               >
-                {isSubmitting ? 'Registering...' : 'Submit Details'}
+                {isSubmitting ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Submitting...
+                  </>
+                ) : 'Submit Request'}
               </button>
             </form>
           )}

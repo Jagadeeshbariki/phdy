@@ -5,6 +5,43 @@ import { Work } from '../types';
 
 const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
 
+const DocumentPreviewRow: React.FC<{ doc: { name: string, url: string }, embedUrl: string }> = ({ doc, embedUrl }) => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="flex flex-col space-y-4">
+      <div 
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center justify-between p-4 bg-orange-50 border border-orange-100 rounded-xl cursor-pointer hover:bg-orange-100 transition-colors"
+      >
+        <div className="flex items-center">
+          <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center text-orange-600 mr-4 shadow-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <p className="font-semibold text-orange-800">{doc.name}</p>
+        </div>
+        <div className="flex gap-4">
+          <span className="text-xs font-black uppercase tracking-widest text-orange-600">
+            {isOpen ? 'Close Preview' : 'Click to Preview'}
+          </span>
+        </div>
+      </div>
+      {isOpen && (
+        <div className="w-full h-[600px] border-2 border-gray-200 rounded-xl overflow-hidden bg-gray-50 shadow-sm animate-fadeIn">
+          <iframe 
+            src={embedUrl}
+            className="w-full h-full"
+            title={doc.name}
+            allow="autoplay"
+          ></iframe>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const OurWorksPage: React.FC = () => {
   const [selectedWork, setSelectedWork] = useState<Work | null>(null);
   const [origin, setOrigin] = useState('');
@@ -164,48 +201,33 @@ const OurWorksPage: React.FC = () => {
           {selectedWork.documents.length > 0 && (
             <div className="mb-12">
               <h3 className="text-2xl font-bold text-gray-900 mb-6 border-b-2 border-orange-100 pb-2">Related Documents</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {selectedWork.documents.map((doc, i) => (
-                  <div key={i} className="flex flex-col space-y-2">
-                    <div className="flex items-center p-4 bg-orange-50 border border-orange-100 rounded-xl hover:bg-orange-100 transition-all group relative">
-                      <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center text-orange-600 mr-4 shadow-sm">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-orange-800 truncate">{doc.name}</p>
-                        <div className="flex gap-4 mt-1">
-                          <a 
-                            href={doc.url} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="text-[10px] font-black uppercase tracking-widest text-orange-600 hover:text-orange-700 underline"
-                          >
-                            Open File
-                          </a>
-                          <a 
-                            href={`https://docs.google.com/viewer?url=${encodeURIComponent(doc.url)}`}
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-gray-700 underline"
-                          >
-                            Browser Preview
-                          </a>
-                        </div>
-                      </div>
-                      <button 
-                        onClick={() => handleDownload(doc.url, doc.name)}
-                        className="ml-4 p-2 bg-white rounded-lg text-orange-600 hover:bg-orange-600 hover:text-white transition-all shadow-sm"
-                        title="Download"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                ))}
+              <div className="grid grid-cols-1 gap-4">
+                {selectedWork.documents.map((doc, i) => {
+                  let embedUrl = doc.url;
+                  if (embedUrl.includes('drive.google.com')) {
+                    if (embedUrl.includes('/view')) {
+                      embedUrl = embedUrl.replace(/\/view.*/, '/preview');
+                    } else {
+                      const match = embedUrl.match(/id=([^&]+)/);
+                      if (match) {
+                        embedUrl = `https://drive.google.com/file/d/${match[1]}/preview`;
+                      } else {
+                        const match2 = embedUrl.match(/\/file\/d\/([^/]+)/);
+                        if (match2) {
+                          embedUrl = `https://drive.google.com/file/d/${match2[1]}/preview`;
+                        }
+                      }
+                    }
+                  } else if (embedUrl.endsWith('.pdf')) {
+                    // Direct PDF links can often be embedded directly
+                  } else {
+                    embedUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(embedUrl)}&embedded=true`;
+                  }
+
+                  return (
+                    <DocumentPreviewRow key={i} doc={doc} embedUrl={embedUrl} />
+                  );
+                })}
               </div>
             </div>
           )}

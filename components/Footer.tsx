@@ -53,6 +53,11 @@ const Footer: React.FC<FooterProps> = ({ onNavClick }) => {
                     </a>
                   </p>
                   <p>
+                    <a href={about.ELink} target="_blank" rel="noreferrer" className="hover:text-white transition-colors font-semibold">
+                      Email: {about.email}
+                    </a>
+                  </p>
+                  <p>
                     <a href={about.ILink} target="_blank" rel="noreferrer" className="hover:text-white transition-colors font-semibold">
                       Instagram: {about.Instagram}
                     </a>

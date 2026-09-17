@@ -12,7 +12,7 @@ import Footer from './components/Footer';
 export type Page = 'home' | 'members' | 'ourworks' | 'accounting' | 'contact' | 'admin';
 
 export interface LoggedInUser {
-  username: string;
+  email: string;
   role: 'admin' | 'phdy_member';
 }
 

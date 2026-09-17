@@ -37,7 +37,7 @@ export const FOOTER_DATA: FooterSection[] = [
                 "Phone":"+91 6300963789",
                 "PLink":"https://wa.me/916300963789?text=I%20am%20interested%20to%20Join%20Your%20Group",
                 "email":"peddaharivanamdevelopmentyouth@gmail.com",
-                "ELink":"mailto:vyomanautjagadeesh@gmail.com",
+                "ELink":"mailto:peddaharivanamdevelopmentyouth@gmail.com",
                 "Instagram":"Pedda Harivanam Development youth",
                 "ILink":"https://www.instagram.com/peddaharivanamdevelopmentyouth/",
                 "YouTube":"Village Governence - Pedda Harivanam",
