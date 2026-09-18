@@ -62,14 +62,67 @@ const ContactSection: React.FC = () => {
     try {
       const cloudinaryData = await uploadToCloudinary(selectedFile);
       
+      const submissionPayload = {
+        action: 'add_join_request',
+        type: 'join_requests',
+        sheet: 'JoinRequests',
+        fullName: formData.fullName.trim(),
+        FullName: formData.fullName.trim(),
+        name: formData.fullName.trim(),
+        Name: formData.fullName.trim(),
+        email: formData.email.trim(),
+        Email: formData.email.trim(),
+        phone: formData.phone.trim(),
+        Phone: formData.phone.trim(),
+        dob: formData.dob,
+        DOB: formData.dob,
+        address: formData.address.trim(),
+        Address: formData.address.trim(),
+        reason: formData.reason.trim(),
+        Reason: formData.reason.trim(),
+        photoUrl: cloudinaryData.secure_url,
+        PhotoUrl: cloudinaryData.secure_url,
+        status: 'In Progress',
+        Status: 'In Progress',
+        "Request Status": 'In Progress',
+        "RequestStatus": 'In Progress',
+        date: new Date().toISOString().split('T')[0],
+        Date: new Date().toISOString().split('T')[0],
+        timestamp: new Date().toISOString(),
+        Timestamp: new Date().toISOString()
+      };
+
+      try {
+        const localReq = {
+          fullName: formData.fullName.trim(),
+          email: formData.email.trim(),
+          phone: formData.phone.trim(),
+          dob: formData.dob,
+          address: formData.address.trim(),
+          reason: formData.reason.trim(),
+          photoUrl: cloudinaryData.secure_url,
+          status: 'In Progress',
+          date: new Date().toISOString().split('T')[0]
+        };
+        const cached: any[] = JSON.parse(localStorage.getItem('phdy_join_requests_cache') || '[]');
+        const targetEmail = localReq.email.toLowerCase();
+        const targetName = localReq.fullName.toLowerCase();
+        const filtered = cached.filter((c: any) => {
+          const cEmail = String(c.email || '').toLowerCase().trim();
+          const cName = String(c.fullName || c.name || '').toLowerCase().trim();
+          if (targetEmail && cEmail) return cEmail !== targetEmail;
+          return cName !== targetName;
+        });
+        filtered.unshift(localReq);
+        localStorage.setItem('phdy_join_requests_cache', JSON.stringify(filtered));
+        // Notify any active admin page
+        window.dispatchEvent(new Event('phdy_join_requests_updated'));
+      } catch (e) {}
+
       await fetch(SPREADSHEET_API_URL, {
         method: 'POST', 
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ 
-          action: 'add_join_request', 
-          ...formData,
-          photoUrl: cloudinaryData.secure_url 
-        }),
+        body: JSON.stringify(submissionPayload),
       });
 
       setIsSubmitting(false);

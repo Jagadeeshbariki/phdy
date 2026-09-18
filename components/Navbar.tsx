@@ -21,11 +21,25 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, loggedInUser, 
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  const roleLower = String(loggedInUser?.role || '').toLowerCase();
+  const isMemberOrAdmin = Boolean(
+    loggedInUser && (roleLower === 'phdy_member' || roleLower === 'admin' || roleLower === 'treasurer' || roleLower === 'tressurer')
+  );
+
+  const getRoleBadge = (roleStr: string) => {
+    const r = String(roleStr || '').toLowerCase();
+    if (r === 'admin') return { label: 'Admin', cls: 'bg-indigo-100 text-indigo-800' };
+    if (r === 'treasurer' || r === 'tressurer') return { label: 'Treasurer', cls: 'bg-emerald-100 text-emerald-800' };
+    if (r === 'phdy_member') return { label: 'Member', cls: 'bg-orange-100 text-orange-800' };
+    return { label: 'User', cls: 'bg-gray-100 text-gray-700' };
+  };
+
   const navItems = [
     { id: 'home', label: 'Home' },
     { id: 'members', label: 'Members' },
     { id: 'ourworks', label: 'Our Works' },
     { id: 'accounting', label: 'Accounting' },
+    ...(isMemberOrAdmin ? [{ id: 'internal', label: 'PHDY Internal' }] : []),
     { id: 'contact', label: 'Contact Us' }
   ];
 
@@ -67,7 +81,7 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, loggedInUser, 
             </button>
           ))}
 
-          {/* Conditional Admin Access */}
+          {/* Conditional Admin Access - STRICTLY Admin Role Only */}
           {loggedInUser?.role === 'admin' && (
             <button
               onClick={() => onNavClick('admin' as Page)}
@@ -83,15 +97,24 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, loggedInUser, 
 
           {/* Authentication Entry Point */}
           {loggedInUser ? (
-            <button
-              onClick={onLogout}
-              className="ml-4 px-6 py-2 bg-gray-100 hover:bg-red-50 text-gray-500 hover:text-red-600 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all border border-transparent hover:border-red-100 flex items-center space-x-2"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-              <span>Sign Out</span>
-            </button>
+            <div className="flex items-center space-x-2 ml-4">
+              <span className="hidden lg:inline text-xs font-bold text-gray-500 max-w-[170px] truncate" title={loggedInUser.email}>
+                {loggedInUser.email.split('@')[0]}
+                <span className={`ml-1.5 text-[9px] px-2 py-0.5 rounded font-black uppercase tracking-wider ${getRoleBadge(loggedInUser.role).cls}`}>
+                  {getRoleBadge(loggedInUser.role).label}
+                </span>
+              </span>
+              <button
+                onClick={onLogout}
+                className="px-4 py-2 bg-gray-100 hover:bg-red-50 text-gray-500 hover:text-red-600 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all border border-transparent hover:border-red-100 flex items-center space-x-1.5"
+                title="Sign Out"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+                <span>Sign Out</span>
+              </button>
+            </div>
           ) : (
             <button
               onClick={() => onNavClick('admin' as Page)}
@@ -141,6 +164,7 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, loggedInUser, 
               </button>
             ))}
             
+            {/* Conditional Admin Access for Mobile */}
             {loggedInUser?.role === 'admin' && (
               <button
                 onClick={() => handleMobileNavClick('admin' as Page)}
@@ -156,21 +180,29 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, loggedInUser, 
 
             <div className="pt-4 border-t border-gray-50 mt-4">
               {loggedInUser ? (
-                <button
-                  onClick={() => { onLogout(); setIsMenuOpen(false); }}
-                  className="w-full py-4 bg-gray-100 text-gray-600 rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center space-x-2"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                  </svg>
-                  <span>Sign Out</span>
-                </button>
+                <div className="space-y-3">
+                  <div className="px-6 py-2 text-xs font-semibold text-gray-500 flex items-center justify-between">
+                    <span className="truncate max-w-[200px]">{loggedInUser.email}</span>
+                    <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-black uppercase tracking-wider ${getRoleBadge(loggedInUser.role).cls}`}>
+                      {getRoleBadge(loggedInUser.role).label}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => { onLogout(); setIsMenuOpen(false); }}
+                    className="w-full py-4 bg-gray-100 hover:bg-red-50 text-gray-600 hover:text-red-600 rounded-2xl font-black uppercase tracking-widest text-xs flex items-center justify-center space-x-2 transition-colors"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                    <span>Sign Out</span>
+                  </button>
+                </div>
               ) : (
                 <button
                   onClick={() => handleMobileNavClick('admin' as Page)}
-                  className="w-full py-5 bg-orange-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-orange-200"
+                  className="w-full py-4 bg-orange-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-orange-200"
                 >
-                  Admin Login
+                  Sign In
                 </button>
               )}
             </div>

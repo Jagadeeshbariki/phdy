@@ -1,7 +1,10 @@
 {
-  "name": " Pedda Harivanam Development Youth",
+  "name": "Pedda Harivanam Development Youth",
   "description": "A community-driven application showcasing the development work and members of the Pedda Harivanam village youth group.",
   "requestFramePermissions": [
     "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }

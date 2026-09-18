@@ -1,4 +1,6 @@
 
+export type UserRole = 'admin' | 'treasurer' | 'phdy_member' | 'user';
+
 export interface Member {
   id: string;
   name: string;
@@ -60,3 +62,18 @@ export function getFinancialYearsList(startYear: number = 2024): string[] {
   }
   return years;
 }
+
+export interface PHDYFundTransaction {
+  id: string;
+  date: string;
+  name: string; // Contributor or Payee name
+  type: 'Credit' | 'Debit' | string; // Credit = Inflow, Debit = Outflow
+  amount: number;
+  purpose: string;
+  category?: string;
+  mode?: string; // UPI, Cash, Bank Transfer, PhonePe, GPay
+  receiptUrl?: string; // Bill / Voucher / Screenshot link
+  balanceAfter?: number;
+  raw?: any;
+}
+

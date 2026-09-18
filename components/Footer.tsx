@@ -1,19 +1,28 @@
 
 import React from 'react';
 import { FOOTER_DATA } from '../FooterData';
+import { LoggedInUser } from '../App';
 
 interface FooterProps {
   onNavClick: (page: any) => void;
+  loggedInUser?: LoggedInUser | null;
 }
 
-const Footer: React.FC<FooterProps> = ({ onNavClick }) => {
+const Footer: React.FC<FooterProps> = ({ onNavClick, loggedInUser }) => {
+  const roleLower = String(loggedInUser?.role || '').toLowerCase();
+  const isMemberOrAdmin = Boolean(
+    loggedInUser && (roleLower === 'phdy_member' || roleLower === 'admin' || roleLower === 'treasurer' || roleLower === 'tressurer')
+  );
+  const isAdmin = Boolean(loggedInUser && loggedInUser.role === 'admin');
+
   const siteMap = [
     { id: 'home', label: 'Home' },
     { id: 'members', label: 'Members' },
     { id: 'ourworks', label: 'Our Works' },
     { id: 'accounting', label: 'Accounting' },
+    ...(isMemberOrAdmin ? [{ id: 'internal', label: 'PHDY Internal' }] : []),
     { id: 'contact', label: 'Contact Us' },
-    { id: 'admin', label: 'Sign In' }
+    ...(isAdmin ? [{ id: 'admin', label: 'Admin Portal' }] : (!loggedInUser ? [{ id: 'admin', label: 'Sign In' }] : []))
   ];
 
   return (
