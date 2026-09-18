@@ -84,7 +84,7 @@ const MembersList: React.FC = () => {
         };
 
         const [joinData, usersData, membersData] = await Promise.all([
-          fetchWithTimeout(`${SPREADSHEET_API_URL}?type=join_requests&_t=${Date.now()}`, { type: 'join_requests' }),
+          fetchWithTimeout(`${SPREADSHEET_API_URL}?type=join_requests&sheet=JoinRequests&_t=${Date.now()}`, { type: 'join_requests', sheet: 'JoinRequests' }),
           fetchWithTimeout(`${SPREADSHEET_API_URL}?type=users&_t=${Date.now()}`, { type: 'users' }),
           fetchWithTimeout(`${SPREADSHEET_API_URL}?type=members&_t=${Date.now()}`, { type: 'members' })
         ]);
@@ -129,13 +129,13 @@ const MembersList: React.FC = () => {
 
       // Filter for approved join requests
       const approvedJoinRequests = Array.from(allJoinRequestsMap.values()).filter(r => {
-        const st = String(r.Status || r.status || r['Request Status'] || '').trim().toLowerCase();
+        const st = String(r.Status || r.status || r['Request Status'] || r.RequestStatus || '').trim().toLowerCase();
         return st === 'approved' || st === 'accept' || st === 'accepted';
       });
 
       // Filter for pending join requests (In Progress)
       const inProgressJoinRequests = Array.from(allJoinRequestsMap.values()).filter(r => {
-        const st = String(r.Status || r.status || r['Request Status'] || '').trim().toLowerCase();
+        const st = String(r.Status || r.status || r['Request Status'] || r.RequestStatus || '').trim().toLowerCase();
         return st === '' || st === 'in progress' || st === 'pending';
       });
 
