@@ -44,29 +44,49 @@ const MembersList: React.FC = () => {
         const timeoutMs = 6000;
         
         // Parallel requests for join requests, users, and fallback members
-        const fetchWithTimeout = async (url: string) => {
+        const fetchWithTimeout = async (url: string, params?: Record<string, string>) => {
           try {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), timeoutMs);
-            const res = await fetch(url, { signal: controller.signal });
+            const res = await fetch(url, { signal: controller.signal, cache: 'no-store' });
             clearTimeout(timer);
             const text = await res.text();
-            if (text.trim().startsWith('<')) return [];
+            const data = parse(text);
+            if (data && data.length > 0) return data;
+          } catch (e) {}
+
+          // Fallback to POST
+          if (params) {
+            try {
+              const res = await fetch(SPREADSHEET_API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({ action: `get_${params.type}`, ...params })
+              });
+              const text = await res.text();
+              return parse(text);
+            } catch (e) {}
+          }
+          return [];
+        };
+
+        const parse = (text: string) => {
+          if (!text || text.trim().startsWith('<')) return [];
+          try {
             const parsed = JSON.parse(text);
             if (Array.isArray(parsed)) return parsed;
             if (Array.isArray(parsed.data)) return parsed.data;
             if (Array.isArray(parsed.requests)) return parsed.requests;
             if (Array.isArray(parsed.users)) return parsed.users;
+            if (Array.isArray(parsed.records)) return parsed.records;
             return [];
-          } catch (e) {
-            return [];
-          }
+          } catch (e) { return []; }
         };
 
         const [joinData, usersData, membersData] = await Promise.all([
-          fetchWithTimeout(`${SPREADSHEET_API_URL}?type=join_requests&_t=${Date.now()}`),
-          fetchWithTimeout(`${SPREADSHEET_API_URL}?type=users&_t=${Date.now()}`),
-          fetchWithTimeout(`${SPREADSHEET_API_URL}?type=members&_t=${Date.now()}`)
+          fetchWithTimeout(`${SPREADSHEET_API_URL}?type=join_requests&_t=${Date.now()}`, { type: 'join_requests' }),
+          fetchWithTimeout(`${SPREADSHEET_API_URL}?type=users&_t=${Date.now()}`, { type: 'users' }),
+          fetchWithTimeout(`${SPREADSHEET_API_URL}?type=members&_t=${Date.now()}`, { type: 'members' })
         ]);
 
         spreadsheetJoinRequests = joinData;

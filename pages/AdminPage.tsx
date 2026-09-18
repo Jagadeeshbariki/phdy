@@ -311,15 +311,13 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
   const fetchSpreadsheetJoinRequests = async () => {
     if (!loggedInUser || loggedInUser.role !== 'admin') return;
     setIsRefreshing(true);
-    try {
-      const normalizeStatus = (raw?: string): 'In Progress' | 'Approved' | 'Rejected' => {
-        const s = String(raw || '').trim().toLowerCase();
-        if (s === 'approved' || s === 'accept' || s === 'accepted') return 'Approved';
-        if (s === 'rejected' || s === 'reject' || s === 'declined') return 'Rejected';
-        return 'In Progress';
-      };
 
-      const parseResponseArray = (text: string): any[] => {
+    const robustFetch = async (params: Record<string, string>, postAction?: string) => {
+      const timeoutMs = 10000;
+      const urlParams = new URLSearchParams({ ...params, _t: Date.now().toString() });
+      const url = `${SPREADSHEET_API_URL}?${urlParams.toString()}`;
+
+      const parse = (text: string) => {
         if (!text || text.trim().startsWith('<')) return [];
         try {
           const parsed = JSON.parse(text);
@@ -328,52 +326,44 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
           if (Array.isArray(parsed.requests)) return parsed.requests;
           if (Array.isArray(parsed.rows)) return parsed.rows;
           if (Array.isArray(parsed.records)) return parsed.records;
+          if (Array.isArray(parsed.users)) return parsed.users;
           return [];
-        } catch (e) {
-          return [];
-        }
+        } catch (e) { return []; }
       };
 
-      let data: any[] = [];
-      if (SPREADSHEET_API_URL) {
-        // 1. Try GET ?type=join_requests&sheet=JoinRequests
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const res = await fetch(url, { signal: controller.signal, cache: 'no-store' });
+        clearTimeout(timer);
+        const text = await res.text();
+        const data = parse(text);
+        if (data.length > 0) return data;
+      } catch (e) {}
+
+      if (postAction) {
         try {
-          const res = await fetch(`${SPREADSHEET_API_URL}?type=join_requests&sheet=JoinRequests&_t=${Date.now()}`, { cache: 'no-store' });
+          const res = await fetch(SPREADSHEET_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: postAction, ...params })
+          });
           const text = await res.text();
-          data = parseResponseArray(text);
+          return parse(text);
         } catch (e) {}
-
-        // 2. Try GET ?type=JoinRequests
-        if (!Array.isArray(data) || data.length === 0) {
-          try {
-            const res = await fetch(`${SPREADSHEET_API_URL}?type=JoinRequests&_t=${Date.now()}`, { cache: 'no-store' });
-            const text = await res.text();
-            data = parseResponseArray(text);
-          } catch (e) {}
-        }
-
-        // 3. Try GET ?type=joinRequests
-        if (!Array.isArray(data) || data.length === 0) {
-          try {
-            const res = await fetch(`${SPREADSHEET_API_URL}?type=joinRequests&_t=${Date.now()}`, { cache: 'no-store' });
-            const text = await res.text();
-            data = parseResponseArray(text);
-          } catch (e) {}
-        }
-
-        // 4. Try POST with action 'get_join_requests'
-        if (!Array.isArray(data) || data.length === 0) {
-          try {
-            const postRes = await fetch(SPREADSHEET_API_URL, {
-              method: 'POST',
-              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-              body: JSON.stringify({ action: 'get_join_requests', type: 'join_requests', sheet: 'JoinRequests' })
-            });
-            const postText = await postRes.text();
-            data = parseResponseArray(postText);
-          } catch (e) {}
-        }
       }
+      return [];
+    };
+
+    try {
+      const normalizeStatus = (raw?: string): 'In Progress' | 'Approved' | 'Rejected' => {
+        const s = String(raw || '').trim().toLowerCase();
+        if (s === 'approved' || s === 'accept' || s === 'accepted') return 'Approved';
+        if (s === 'rejected' || s === 'reject' || s === 'declined') return 'Rejected';
+        return 'In Progress';
+      };
+
+      const data = await robustFetch({ type: 'join_requests' }, 'get_join_requests');
 
       // Load locally cached requests
       let cachedRequests: any[] = [];
@@ -449,49 +439,50 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
   const fetchSpreadsheetUsers = async () => {
     if (!loggedInUser || loggedInUser.role !== 'admin') return;
     setIsRefreshing(true);
-    try {
-      let data: any[] = [];
-      if (SPREADSHEET_API_URL) {
-        // 1. Try GET ?type=users
+
+    const robustFetch = async (params: Record<string, string>, postAction?: string) => {
+      const timeoutMs = 10000;
+      const urlParams = new URLSearchParams({ ...params, _t: Date.now().toString() });
+      const url = `${SPREADSHEET_API_URL}?${urlParams.toString()}`;
+
+      const parse = (text: string) => {
+        if (!text || text.trim().startsWith('<')) return [];
         try {
-          const res = await fetch(`${SPREADSHEET_API_URL}?type=users&_t=${Date.now()}`, { cache: 'no-store' });
+          const parsed = JSON.parse(text);
+          if (Array.isArray(parsed)) return parsed;
+          if (Array.isArray(parsed.data)) return parsed.data;
+          if (Array.isArray(parsed.users)) return parsed.users;
+          if (Array.isArray(parsed.records)) return parsed.records;
+          return [];
+        } catch (e) { return []; }
+      };
+
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const res = await fetch(url, { signal: controller.signal, cache: 'no-store' });
+        clearTimeout(timer);
+        const text = await res.text();
+        const data = parse(text);
+        if (data.length > 0) return data;
+      } catch (e) {}
+
+      if (postAction) {
+        try {
+          const res = await fetch(SPREADSHEET_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: postAction, ...params })
+          });
           const text = await res.text();
-          if (!text.trim().startsWith('<')) {
-            data = JSON.parse(text);
-          }
-        } catch (e) {
-          console.warn("Spreadsheet GET users failed:", e);
-        }
-
-        // 2. Try GET ?type=Users
-        if (!Array.isArray(data) || data.length === 0) {
-          try {
-            const res = await fetch(`${SPREADSHEET_API_URL}?type=Users&_t=${Date.now()}`, { cache: 'no-store' });
-            const text = await res.text();
-            if (!text.trim().startsWith('<')) {
-              data = JSON.parse(text);
-            }
-          } catch (e) {}
-        }
-
-        // 3. Try POST with action 'get_users'
-        if (!Array.isArray(data) || data.length === 0) {
-          try {
-            const postRes = await fetch(SPREADSHEET_API_URL, {
-              method: 'POST',
-              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-              body: JSON.stringify({ action: 'get_users' })
-            });
-            const postText = await postRes.text();
-            if (!postText.trim().startsWith('<')) {
-              const postJson = JSON.parse(postText);
-              if (Array.isArray(postJson)) data = postJson;
-              else if (Array.isArray(postJson.users)) data = postJson.users;
-              else if (Array.isArray(postJson.data)) data = postJson.data;
-            }
-          } catch (e) {}
-        }
+          return parse(text);
+        } catch (e) {}
       }
+      return [];
+    };
+
+    try {
+      const data = await robustFetch({ type: 'users' }, 'get_users');
 
       // Base users: Only the current logged-in admin as a fallback to keep the session alive
       const userMap = new Map<string, any>();
