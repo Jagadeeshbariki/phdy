@@ -486,8 +486,13 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         body: JSON.stringify({
           action: 'register',
           name: newUser.name,
+          Name: newUser.name,
           email: newUser.email,
+          Email: newUser.email,
           role: newUser.role,
+          Role: newUser.role,
+          status: 'Active',
+          Status: 'Active',
           password: 'TemporaryPassword123!'
         })
       });
@@ -960,6 +965,8 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({
             action: 'approve_join_request',
+            type: 'join_requests',
+            sheet: 'JoinRequests',
             email: finalEmailLower,
             fullName: req.fullName,
             phone: req.phone || '',
@@ -967,7 +974,10 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
             address: req.address || '',
             reason: req.reason || '',
             photoUrl: req.photoUrl || '',
-            status: 'Approved'
+            status: 'Approved',
+            Status: 'Approved',
+            'Request Status': 'Approved',
+            'RequestStatus': 'Approved'
           })
         });
       } catch (e) {}
@@ -979,6 +989,8 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({
             action: 'update_join_request_status',
+            type: 'join_requests',
+            sheet: 'JoinRequests',
             email: finalEmailLower,
             fullName: req.fullName,
             status: 'Approved',
@@ -997,9 +1009,15 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
           body: JSON.stringify({
             action: 'register',
             name: req.fullName,
+            Name: req.fullName,
+            fullName: req.fullName,
+            FullName: req.fullName,
             email: finalEmailLower,
+            Email: finalEmailLower,
             role: 'phdy_member',
-            status: 'Active'
+            Role: 'phdy_member',
+            status: 'Active',
+            Status: 'Active'
           })
         });
       } catch (e) {}
@@ -1070,6 +1088,8 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({
             action: 'reject_join_request',
+            type: 'join_requests',
+            sheet: 'JoinRequests',
             email: finalEmailLower,
             status: 'Rejected',
             Status: 'Rejected',
@@ -1085,6 +1105,8 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({
             action: 'update_join_request_status',
+            type: 'join_requests',
+            sheet: 'JoinRequests',
             email: finalEmailLower,
             fullName: req.fullName,
             status: 'Rejected',

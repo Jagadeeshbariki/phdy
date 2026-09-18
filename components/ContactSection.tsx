@@ -63,7 +63,7 @@ const ContactSection: React.FC = () => {
       const cloudinaryData = await uploadToCloudinary(selectedFile);
       
       const submissionPayload = {
-        action: 'add_join_request',
+        action: 'add',
         type: 'join_requests',
         sheet: 'JoinRequests',
         fullName: formData.fullName.trim(),
