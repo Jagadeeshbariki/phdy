@@ -284,10 +284,77 @@ const formatDisplayDate = (dateStr: string | undefined): string => {
   return `${day}/${month}/${year}`;
 };
 
+interface ParsedVideoLink {
+  type: 'youtube' | 'external_live';
+  embedUrl?: string;
+  watchUrl: string;
+  label: string;
+}
+
+const parseVideoOrLiveLink = (rawLink: string, currentOrigin: string): ParsedVideoLink | null => {
+  if (!rawLink || typeof rawLink !== 'string') return null;
+  const link = rawLink.trim();
+  if (!link) return null;
+
+  // 1. YouTube 11-char ID directly (e.g. gXbjujix5lU)
+  if (/^[a-zA-Z0-9_-]{11}$/.test(link)) {
+    const queryParams = new URLSearchParams({
+      rel: '0',
+      origin: currentOrigin,
+      enablejsapi: '1'
+    }).toString();
+    return {
+      type: 'youtube',
+      embedUrl: `https://www.youtube.com/embed/${link}?${queryParams}`,
+      watchUrl: `https://www.youtube.com/watch?v=${link}`,
+      label: 'YouTube Video'
+    };
+  }
+
+  // 2. YouTube URL (watch?v=, youtu.be/, live/, shorts/, embed/)
+  const ytMatch = link.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|live\/|shorts\/))([\w-]{11})/i);
+  if (ytMatch && ytMatch[1]) {
+    const videoId = ytMatch[1];
+    const queryParams = new URLSearchParams({
+      rel: '0',
+      origin: currentOrigin,
+      enablejsapi: '1'
+    }).toString();
+    return {
+      type: 'youtube',
+      embedUrl: `https://www.youtube.com/embed/${videoId}?${queryParams}`,
+      watchUrl: `https://www.youtube.com/watch?v=${videoId}`,
+      label: link.includes('/live/') ? 'YouTube Live Stream' : 'YouTube Video'
+    };
+  }
+
+  // 3. Any other live stream or broadcast link (Facebook Live, Zoom, generic stream URL)
+  if (link.startsWith('http://') || link.startsWith('https://')) {
+    return {
+      type: 'external_live',
+      watchUrl: link,
+      label: 'Live Broadcast / Stream'
+    };
+  }
+
+  return null;
+};
+
 const OurWorksPage: React.FC = () => {
   const [selectedWork, setSelectedWork] = useState<Work | null>(null);
   const [origin, setOrigin] = useState('');
-  const [works, setWorks] = useState<Work[]>(WORKS_DATA);
+  const [works, setWorks] = useState<Work[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = sessionStorage.getItem('phdy_works_cache');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch (e) {}
+    }
+    return WORKS_DATA;
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -339,13 +406,27 @@ const OurWorksPage: React.FC = () => {
                 }
               }
 
+              // Support multiple column names for live link and YouTube video
+              const rawVideo = item.youtubeLink || item.youtube_link || item.liveLink || item.live_link || item.video || item.videos || item['Live Link'] || item['YouTube Link'];
+              let videoList: string[] = [];
+              if (Array.isArray(rawVideo)) {
+                videoList = rawVideo.map(v => String(v).trim()).filter(Boolean);
+              } else if (typeof rawVideo === 'string' && rawVideo.trim() !== '') {
+                try {
+                  const parsed = JSON.parse(rawVideo);
+                  videoList = Array.isArray(parsed) ? parsed.map(v => String(v).trim()).filter(Boolean) : [rawVideo.trim()];
+                } catch (e) {
+                  videoList = [rawVideo.trim()];
+                }
+              }
+
               return {
                 id: 1000 + index,
                 title: String(item.title || 'Untitled Work').trim(),
                 date: formatDisplayDate(item.date),
                 description: String(item.description || ''),
                 photos: photos.filter(p => typeof p === 'string' && p.trim() !== ''),
-                videos: item.youtubeLink ? [String(item.youtubeLink).trim()] : [],
+                videos: videoList,
                 documents: documents.filter(d => d && d.url)
               };
             });
@@ -354,7 +435,11 @@ const OurWorksPage: React.FC = () => {
           const staticWorks = WORKS_DATA.filter(
             staticItem => !formattedWorks.some(fw => fw.title.toLowerCase() === (staticItem.title || '').trim().toLowerCase())
           );
-          setWorks([...[...formattedWorks].reverse(), ...staticWorks]);
+          const combinedWorks = [...[...formattedWorks].reverse(), ...staticWorks];
+          setWorks(combinedWorks);
+          try {
+            sessionStorage.setItem('phdy_works_cache', JSON.stringify(combinedWorks));
+          } catch (e) {}
         }
       } catch (err) {
         console.warn("Failed to fetch works:", err);
@@ -430,34 +515,85 @@ const OurWorksPage: React.FC = () => {
 
           {selectedWork.videos.length > 0 && selectedWork.videos.some(v => v && v.trim() !== "") && (
             <div className="mb-12">
-              <h3 className="text-2xl font-bold text-gray-900 mb-6 border-b-2 border-orange-100 pb-2">Video Footage</h3>
+              <div className="flex items-center justify-between mb-6 border-b-2 border-orange-100 pb-2">
+                <h3 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                  <span>Video Footage & Live Links</span>
+                  <span className="bg-red-100 text-red-700 text-xs font-black px-2.5 py-0.5 rounded-full uppercase">
+                    Live
+                  </span>
+                </h3>
+              </div>
               <div className="grid grid-cols-1 gap-8">
                 {selectedWork.videos.map((vid, i) => {
-                  const videoId = vid?.trim();
-                  if (!videoId) return null;
+                  const parsed = parseVideoOrLiveLink(vid, origin);
+                  if (!parsed) return null;
 
-                  // Error 153 is often resolved by ensuring 'origin' matches the host and using a clean 'youtube.com/embed/' path.
-                  // 'enablejsapi=1' allows the player to correctly bridge with the parent frame.
-                  const queryParams = new URLSearchParams({
-                    rel: '0',
-                    origin: origin,
-                    enablejsapi: '1',
-                    widget_referrer: origin
-                  }).toString();
+                  if (parsed.type === 'youtube' && parsed.embedUrl) {
+                    return (
+                      <div key={i} className="flex flex-col space-y-3">
+                        <div className="aspect-video rounded-3xl overflow-hidden shadow-2xl bg-black border-4 border-orange-100 relative">
+                          <iframe 
+                            className="w-full h-full"
+                            src={parsed.embedUrl}
+                            title={`${selectedWork.title} Video ${i + 1}`}
+                            frameBorder="0"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                            allowFullScreen
+                            loading="lazy"
+                          ></iframe>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-xl gap-2 text-xs">
+                          <div className="flex items-center gap-2 font-bold text-gray-700">
+                            <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse"></span>
+                            <span>{parsed.label}</span>
+                          </div>
+                          <a 
+                            href={parsed.watchUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg shadow-sm transition-all flex items-center gap-1.5"
+                          >
+                            <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                              <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                            </svg>
+                            <span>Watch on YouTube / Open App</span>
+                          </a>
+                        </div>
+                      </div>
+                    );
+                  }
 
-                  return (
-                    <div key={`${videoId}-${i}`} className="aspect-video rounded-3xl overflow-hidden shadow-2xl bg-black border-4 border-orange-100">
-                      <iframe 
-                        className="w-full h-full"
-                        src={`https://www.youtube.com/embed/${videoId}?${queryParams}`}
-                        title={`YouTube video for ${selectedWork.title}`}
-                        frameBorder="0"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                        allowFullScreen
-                        loading="lazy"
-                      ></iframe>
-                    </div>
-                  );
+                  if (parsed.type === 'external_live') {
+                    return (
+                      <div key={i} className="p-6 bg-gradient-to-br from-red-600 to-orange-600 text-white rounded-3xl shadow-xl flex flex-col md:flex-row items-center justify-between gap-6">
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center flex-shrink-0">
+                            <span className="w-4 h-4 rounded-full bg-white animate-ping"></span>
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="px-2 py-0.5 bg-white text-red-600 font-black text-[10px] rounded uppercase tracking-wider">LIVE</span>
+                              <h4 className="font-bold text-lg">{parsed.label}</h4>
+                            </div>
+                            <p className="text-white/80 text-xs truncate max-w-md">{parsed.watchUrl}</p>
+                          </div>
+                        </div>
+                        <a
+                          href={parsed.watchUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-6 py-3 bg-white text-red-600 hover:bg-orange-50 font-black text-sm rounded-xl shadow-lg transition-all flex items-center gap-2 flex-shrink-0"
+                        >
+                          <span>Watch Live Stream</span>
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                          </svg>
+                        </a>
+                      </div>
+                    );
+                  }
+
+                  return null;
                 })}
               </div>
             </div>
@@ -541,10 +677,16 @@ const OurWorksPage: React.FC = () => {
                     </svg>
                   </div>
                 )}
-                <div className="absolute top-4 left-4">
-                   <span className="bg-orange-500 text-white text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-tighter">
+                <div className="absolute top-4 left-4 flex flex-col gap-1.5 items-start">
+                   <span className="bg-orange-500 text-white text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-tighter shadow-md">
                      {work.date || 'Record'}
                    </span>
+                   {work.videos && work.videos.length > 0 && work.videos.some(v => v && v.trim() !== '') && (
+                     <span className="bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider flex items-center gap-1.5 shadow-md">
+                       <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping"></span>
+                       Live Video
+                     </span>
+                   )}
                 </div>
               </div>
               

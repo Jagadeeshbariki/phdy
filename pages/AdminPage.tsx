@@ -121,7 +121,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     if (!SPREADSHEET_API_URL || !loggedInUser) return;
     setIsRefreshing(true);
     try {
-      const res = await fetch(`${SPREADSHEET_API_URL}?type=works&_t=${Date.now()}`, { cache: 'no-store' });
+      const res = await fetch(`${SPREADSHEET_API_URL}?type=works&_t=${Date.now()}`);
       const text = await res.text();
       let data = [];
       if (text.trim().startsWith('<')) {
@@ -819,6 +819,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                         <th className="pb-4">Title</th>
                         <th className="pb-4">Photos</th>
                         <th className="pb-4">Docs</th>
+                        <th className="pb-4">Live Link</th>
                         <th className="pb-4 text-right">Action</th>
                       </tr>
                     </thead>
@@ -845,12 +846,29 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                           docCount = w.documents ? 1 : 0;
                         }
 
+                        const liveLink = w.youtubeLink || w.youtube_link || w.liveLink || w.live_link || w.video || '';
+
                         return (
                           <tr key={idx}>
                             <td className="py-4 text-sm font-bold text-gray-500">{formatDisplayDate(w.date)}</td>
                             <td className="py-4 font-bold">{w.title}</td>
                             <td className="py-4 text-sm text-gray-500">{photoCount}</td>
                             <td className="py-4 text-sm text-gray-500">{docCount}</td>
+                            <td className="py-4 text-sm text-gray-500">
+                              {liveLink ? (
+                                <a 
+                                  href={liveLink.startsWith('http') ? liveLink : `https://www.youtube.com/watch?v=${liveLink}`} 
+                                  target="_blank" 
+                                  rel="noreferrer" 
+                                  className="text-red-600 font-bold hover:underline flex items-center gap-1.5 text-xs"
+                                >
+                                  <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse"></span>
+                                  Live / Video
+                                </a>
+                              ) : (
+                                <span className="text-gray-300 text-xs">None</span>
+                              )}
+                            </td>
                             <td className="py-4 text-right">
                               <button 
                                 onClick={() => handleDeleteWork(w.title)}
