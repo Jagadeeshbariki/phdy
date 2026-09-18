@@ -54,20 +54,44 @@ const AccountingPage: React.FC = () => {
 
   useEffect(() => {
     const fetchDynamicAccounting = async () => {
+      const timeoutMs = 8000;
       try {
-        const res = await fetch(`${SPREADSHEET_API_URL}?type=accounting`);
-        const text = await res.text();
-        let data = [];
-        if (text.trim().startsWith('<')) {
-          console.warn("Spreadsheet API returned HTML instead of JSON for accounting data. Check the Apps Script deployment.");
-        } else {
+        const robustFetch = async () => {
+          // 1. Try GET
           try {
-            data = JSON.parse(text);
-          } catch (e) {
-            console.warn("Failed to parse accounting data as JSON:", e);
-          }
-        }
-        setDynamicRecords(Array.isArray(data) ? data : []);
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeoutMs);
+            const res = await fetch(`${SPREADSHEET_API_URL}?type=accounting&_t=${Date.now()}`, { 
+              signal: controller.signal,
+              cache: 'no-store'
+            });
+            clearTimeout(timer);
+            const text = await res.text();
+            if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+              const parsed = JSON.parse(text);
+              const data = Array.isArray(parsed) ? parsed : (parsed.data || []);
+              if (data.length > 0) return data;
+            }
+          } catch (e) {}
+
+          // 2. Try POST fallback
+          try {
+            const res = await fetch(SPREADSHEET_API_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify({ action: 'get_accounting', type: 'accounting' })
+            });
+            const text = await res.text();
+            if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+              const parsed = JSON.parse(text);
+              return Array.isArray(parsed) ? parsed : (parsed.data || []);
+            }
+          } catch (e) {}
+          return [];
+        };
+
+        const data = await robustFetch();
+        setDynamicRecords(data);
       } catch (err) {
         console.warn("Failed to load dynamic accounting:", err);
       } finally {

@@ -715,6 +715,8 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     setAuthError('');
     setAuthSuccess('');
     setIsAuthenticating(true);
+    const timeoutMs = 15000;
+
     try {
       let action = '';
       if (authMode === 'login') action = 'login';
@@ -722,29 +724,41 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       else if (authMode === 'forgot') action = 'request_otp';
       else if (authMode === 'reset') action = 'reset_password';
 
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+
       // Use text/plain to avoid CORS preflight while still sending JSON string
       const res = await fetch(SPREADSHEET_API_URL, {
         method: 'POST',
+        signal: controller.signal,
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({
           action: action,
           name: loginData.name || '',
-          email: loginData.email,
+          email: loginData.email.trim(),
           password: loginData.password,
           newPassword: loginData.newPassword,
           otp: loginData.otp
         })
       });
-
+      
+      clearTimeout(timer);
       const responseText = await res.text();
+
+      // Diagnostic check for common Google Apps Script errors
+      if (responseText.trim().startsWith('<!DOCTYPE html>') || responseText.includes('<script')) {
+        throw new Error("The server returned HTML instead of data. This usually means the Google Apps Script is not deployed as 'Anyone' or needs authorization.");
+      }
+
       let data;
       try {
         data = JSON.parse(responseText);
       } catch (err) {
+        console.error("Parse error. Response was:", responseText);
         if (responseText.includes("MailApp") || responseText.includes("permission")) {
           throw new Error("Apps Script requires Email permissions. Go to your script, run 'setupFirstAdmin' to trigger the authorization prompt, then Deploy as a NEW VERSION.");
         }
-        throw new Error("Invalid response from server. Check deployment.");
+        throw new Error("Invalid response from server. Please ensure your Apps Script is deployed as 'Anyone' and as a 'Web App'.");
       }
       
       if (data.status === 'success') {
@@ -1332,6 +1346,19 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
             ) : (
               <button type="button" onClick={() => { setAuthMode('login'); setAuthError(''); setAuthSuccess(''); }} className="text-xs font-bold text-orange-600 hover:underline">Back to Login</button>
             )}
+          </div>
+
+          <div className="mt-10 pt-8 border-t border-gray-100">
+            <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4 flex items-center justify-center gap-2">
+              <RefreshCw className="h-3 w-3" />
+              Deployment Troubleshooting
+            </h3>
+            <p className="text-[10px] text-gray-400 leading-relaxed italic">
+              If login or data fetching works here but fails in your live link, please ensure your Google Apps Script is deployed as a <strong>Web App</strong> with <strong>Access: Anyone</strong>. 
+              <br/><br/>
+              In Google Apps Script: 
+              Click <strong>Deploy &rarr; Manage deployments &rarr; Edit (pencil) &rarr; Version: New version &rarr; Who has access: Anyone &rarr; Deploy</strong>.
+            </p>
           </div>
         </div>
       </div>

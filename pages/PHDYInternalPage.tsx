@@ -153,24 +153,46 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
     if (showSyncIndicator) setIsSyncing(true);
     else setIsLoading(true);
 
+    const timeoutMs = 8000;
     try {
-      // Query type=phdy_funds
-      const res = await fetch(`${SPREADSHEET_API_URL}?type=phdy_funds&_t=${Date.now()}`);
-      const text = await res.text();
-      let data: any[] = [];
-
-      if (text.trim().startsWith('<')) {
-        console.warn("Spreadsheet API returned HTML for Phdy_funds. The Apps Script route may need to be updated.");
-      } else {
+      const robustFetch = async () => {
+        // 1. Try GET
         try {
-          data = JSON.parse(text);
-        } catch (e) {
-          console.warn("Could not parse Phdy_funds response:", e);
-        }
-      }
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), timeoutMs);
+          const res = await fetch(`${SPREADSHEET_API_URL}?type=phdy_funds&_t=${Date.now()}`, { 
+            signal: controller.signal,
+            cache: 'no-store'
+          });
+          clearTimeout(timer);
+          const text = await res.text();
+          if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+            const parsed = JSON.parse(text);
+            const data = Array.isArray(parsed) ? parsed : (parsed.data || []);
+            if (data.length > 0) return data;
+          }
+        } catch (e) {}
+
+        // 2. Try POST fallback
+        try {
+          const res = await fetch(SPREADSHEET_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'get_phdy_funds', type: 'phdy_funds' })
+          });
+          const text = await res.text();
+          if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+            const parsed = JSON.parse(text);
+            return Array.isArray(parsed) ? parsed : (parsed.data || []);
+          }
+        } catch (e) {}
+        return [];
+      };
+
+      const data = await robustFetch();
 
       // Check if data is valid Phdy_funds records
-      if (Array.isArray(data) && data.length > 0 && (data[0].Amount !== undefined || data[0].amount !== undefined || data[0].Purpose !== undefined || data[0].Name !== undefined || data[0].name !== undefined)) {
+      if (Array.isArray(data) && data.length > 0) {
         const parsedFunds: PHDYFundTransaction[] = data.map((item, idx) => {
           const rawAmount = item.Amount ?? item.amount ?? item.Rupees ?? item.rupees ?? item['Amount (Rs)'] ?? item['Amount(Rs)'] ?? 0;
           const cleanAmount = typeof rawAmount === 'number' 

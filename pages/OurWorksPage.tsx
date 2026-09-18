@@ -364,19 +364,43 @@ const OurWorksPage: React.FC = () => {
     }
 
     const fetchWorks = async () => {
+      const timeoutMs = 8000;
       try {
-        const res = await fetch(`${SPREADSHEET_API_URL}?type=works&_t=${Date.now()}`);
-        const text = await res.text();
-        let data = [];
-        if (text.trim().startsWith('<')) {
-          console.warn("Spreadsheet API returned HTML instead of JSON for works. Check the Apps Script deployment.");
-        } else {
+        const robustFetch = async () => {
+          // 1. Try GET
           try {
-            data = JSON.parse(text);
-          } catch (e) {
-            console.warn("Failed to parse works data as JSON:", e);
-          }
-        }
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeoutMs);
+            const res = await fetch(`${SPREADSHEET_API_URL}?type=works&_t=${Date.now()}`, { 
+              signal: controller.signal,
+              cache: 'no-store'
+            });
+            clearTimeout(timer);
+            const text = await res.text();
+            if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+              const parsed = JSON.parse(text);
+              const data = Array.isArray(parsed) ? parsed : (parsed.data || []);
+              if (data.length > 0) return data;
+            }
+          } catch (e) {}
+
+          // 2. Try POST fallback
+          try {
+            const res = await fetch(SPREADSHEET_API_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify({ action: 'get_works', type: 'works' })
+            });
+            const text = await res.text();
+            if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+              const parsed = JSON.parse(text);
+              return Array.isArray(parsed) ? parsed : (parsed.data || []);
+            }
+          } catch (e) {}
+          return [];
+        };
+
+        const data = await robustFetch();
         if (Array.isArray(data)) {
           const formattedWorks: Work[] = data
             .filter((item: any) => item && (item.title || item.description))
