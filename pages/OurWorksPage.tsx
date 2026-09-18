@@ -5,41 +5,283 @@ import { Work } from '../types';
 
 const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
 
+const isCloudinaryUrl = (url: string) => {
+  return typeof url === 'string' && url.includes('cloudinary.com');
+};
+
+const getCloudinaryPageImageUrl = (url: string, page: number = 1): string => {
+  if (!isCloudinaryUrl(url)) return url;
+  
+  // Convert .pdf to .jpg so Cloudinary serves the rendered document image with 200 OK
+  let converted = url.replace(/\.pdf($|\?)/i, '.jpg$1');
+  
+  if (converted.includes('/image/upload/')) {
+    if (/\/pg_\d+\//.test(converted)) {
+      converted = converted.replace(/\/pg_\d+\//, `/pg_${page}/`);
+    } else {
+      converted = converted.replace(/\/image\/upload\/(v\d+\/)?/, `/image/upload/pg_${page}/$1`);
+    }
+  }
+  return converted;
+};
+
+const getCloudinaryDownloadUrl = (url: string): string => {
+  if (!isCloudinaryUrl(url)) return url;
+  
+  let downloadUrl = url;
+  if (downloadUrl.includes('/image/upload/')) {
+    // fl_attachment forces instant file download with 200 OK
+    downloadUrl = downloadUrl.replace(/\/image\/upload\//, '/image/upload/fl_attachment/');
+    downloadUrl = downloadUrl.replace(/\.pdf($|\?)/i, '.jpg$1');
+  }
+  return downloadUrl;
+};
+
 const DocumentPreviewRow: React.FC<{ doc: { name: string, url: string }, embedUrl: string }> = ({ doc, embedUrl }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [zoom, setZoom] = useState(100);
+  const [imgLoading, setImgLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+  const [isLastPage, setIsLastPage] = useState(false);
+
+  const isCloudinary = isCloudinaryUrl(doc.url);
+  const pageImageUrl = getCloudinaryPageImageUrl(doc.url, page);
+  const downloadUrl = isCloudinary ? getCloudinaryDownloadUrl(doc.url) : doc.url;
+
+  const handlePrevPage = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (page > 1) {
+      setImgLoading(true);
+      setHasError(false);
+      setIsLastPage(false);
+      setPage(p => p - 1);
+    }
+  };
+
+  const handleNextPage = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isLastPage) {
+      setImgLoading(true);
+      setHasError(false);
+      setPage(p => p + 1);
+    }
+  };
+
+  const handleImageError = () => {
+    setImgLoading(false);
+    if (page > 1) {
+      setIsLastPage(true);
+      setPage(p => p - 1);
+    } else {
+      setHasError(true);
+    }
+  };
 
   return (
     <div className="flex flex-col space-y-4">
       <div 
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center justify-between p-4 bg-orange-50 border border-orange-100 rounded-xl cursor-pointer hover:bg-orange-100 transition-colors"
+        className="flex flex-wrap items-center justify-between p-4 bg-orange-50 border border-orange-100 rounded-2xl cursor-pointer hover:bg-orange-100 transition-colors gap-3"
       >
-        <div className="flex items-center">
-          <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center text-orange-600 mr-4 shadow-sm">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="flex items-center min-w-0">
+          <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-orange-600 mr-3 shadow-sm flex-shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
           </div>
-          <p className="font-semibold text-orange-800">{doc.name}</p>
+          <div className="truncate">
+            <p className="font-bold text-orange-950 truncate">{doc.name}</p>
+            <span className="text-[11px] text-orange-700 font-medium">Official Attached Document</span>
+          </div>
         </div>
-        <div className="flex gap-4">
-          <span className="text-xs font-black uppercase tracking-widest text-orange-600">
-            {isOpen ? 'Close Preview' : 'Click to Preview'}
-          </span>
+
+        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          <a
+            href={downloadUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            download={doc.name}
+            className="px-3 py-1.5 text-xs font-bold text-gray-700 bg-white hover:text-orange-600 hover:border-orange-200 border border-gray-200 rounded-lg transition-all shadow-sm flex items-center gap-1.5"
+            title="Download file"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            <span>Download</span>
+          </a>
+
+          <a
+            href={isCloudinary ? pageImageUrl : doc.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-1.5 text-xs font-bold text-gray-700 bg-white hover:text-orange-600 hover:border-orange-200 border border-gray-200 rounded-lg transition-all shadow-sm flex items-center gap-1.5"
+            title="Open in new tab"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+            <span className="hidden sm:inline">New Tab</span>
+          </a>
+
+          <button
+            type="button"
+            onClick={() => setIsOpen(!isOpen)}
+            className="px-4 py-1.5 text-xs font-black uppercase tracking-wider bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-all shadow-sm flex items-center gap-1"
+          >
+            <span>{isOpen ? 'Close' : 'Preview'}</span>
+            <svg xmlns="http://www.w3.org/2000/svg" className={`h-3.5 w-3.5 transform transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
         </div>
       </div>
+
       {isOpen && (
-        <div className="w-full h-[600px] border-2 border-gray-200 rounded-xl overflow-hidden bg-gray-50 shadow-sm animate-fadeIn">
-          <iframe 
-            src={embedUrl}
-            className="w-full h-full"
-            title={doc.name}
-            allow="autoplay"
-          ></iframe>
+        <div className="w-full border-2 border-orange-200 rounded-2xl overflow-hidden bg-slate-900 shadow-xl animate-fadeIn flex flex-col">
+          {isCloudinary ? (
+            <div>
+              {/* Document Toolbar */}
+              <div className="bg-slate-800 text-slate-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-slate-700 text-xs select-none">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-slate-300 truncate max-w-[200px] sm:max-w-xs">{doc.name}</span>
+                </div>
+
+                {/* Page and Zoom Navigation */}
+                <div className="flex items-center gap-4">
+                  {/* Page Controls */}
+                  <div className="flex items-center bg-slate-700 rounded-lg p-0.5 border border-slate-600">
+                    <button
+                      type="button"
+                      onClick={handlePrevPage}
+                      disabled={page <= 1}
+                      className="px-2 py-1 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed rounded text-slate-200 font-bold transition-colors"
+                      title="Previous Page"
+                    >
+                      ‹
+                    </button>
+                    <span className="px-2 font-mono text-[11px] font-bold text-orange-400">Page {page}</span>
+                    <button
+                      type="button"
+                      onClick={handleNextPage}
+                      disabled={isLastPage}
+                      className="px-2 py-1 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed rounded text-slate-200 font-bold transition-colors"
+                      title="Next Page"
+                    >
+                      ›
+                    </button>
+                  </div>
+
+                  {/* Zoom Controls */}
+                  <div className="hidden sm:flex items-center bg-slate-700 rounded-lg p-0.5 border border-slate-600">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setZoom(z => Math.max(60, z - 15)); }}
+                      className="px-2 py-1 hover:bg-slate-600 rounded text-slate-200 font-bold"
+                      title="Zoom Out"
+                    >
+                      -
+                    </button>
+                    <span className="px-2 font-mono text-[11px] text-slate-300 min-w-[45px] text-center">{zoom}%</span>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setZoom(z => Math.min(180, z + 15)); }}
+                      className="px-2 py-1 hover:bg-slate-600 rounded text-slate-200 font-bold"
+                      title="Zoom In"
+                    >
+                      +
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setZoom(100); }}
+                      className="px-1.5 py-1 hover:bg-slate-600 rounded text-[10px] text-slate-400"
+                      title="Reset Zoom"
+                    >
+                      100%
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <a
+                    href={pageImageUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-orange-400 hover:text-orange-300 font-semibold underline text-[11px]"
+                  >
+                    Open Full Image
+                  </a>
+                </div>
+              </div>
+
+              {/* Document Display Canvas */}
+              <div className="relative min-h-[550px] max-h-[800px] overflow-auto p-4 sm:p-8 bg-slate-950 flex items-center justify-center">
+                {imgLoading && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/80 z-10 space-y-3">
+                    <div className="animate-spin rounded-full h-10 w-10 border-4 border-orange-400 border-t-transparent"></div>
+                    <p className="text-xs font-bold text-orange-400 uppercase tracking-widest">Rendering Document Page...</p>
+                  </div>
+                )}
+
+                {hasError ? (
+                  <div className="text-center p-8 bg-slate-800 rounded-xl max-w-md border border-slate-700">
+                    <p className="text-red-400 font-bold mb-2">Could not render preview</p>
+                    <p className="text-slate-400 text-xs mb-4">You can still download or open the file directly.</p>
+                    <a
+                      href={downloadUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-block px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-lg shadow"
+                    >
+                      Download Document
+                    </a>
+                  </div>
+                ) : (
+                  <div 
+                    className="transition-transform duration-200 origin-top shadow-2xl bg-white rounded-lg overflow-hidden flex justify-center"
+                    style={{ transform: `scale(${zoom / 100})` }}
+                  >
+                    <img 
+                      src={pageImageUrl}
+                      alt={`${doc.name} Page ${page}`}
+                      onLoad={() => setImgLoading(false)}
+                      onError={handleImageError}
+                      className="max-w-full h-auto object-contain block select-none"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="w-full h-[600px] bg-gray-50">
+              <iframe 
+                src={embedUrl}
+                className="w-full h-full border-0"
+                title={doc.name}
+                allow="autoplay"
+              ></iframe>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
+};
+
+const formatDisplayDate = (dateStr: string | undefined): string => {
+  if (!dateStr) return '';
+  const trimmed = String(dateStr).trim();
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)) return trimmed;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const parts = trimmed.split('-');
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+  const d = new Date(trimmed);
+  if (isNaN(d.getTime())) return trimmed;
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
 };
 
 const OurWorksPage: React.FC = () => {
@@ -56,7 +298,7 @@ const OurWorksPage: React.FC = () => {
 
     const fetchWorks = async () => {
       try {
-        const res = await fetch(`${SPREADSHEET_API_URL}?type=works`);
+        const res = await fetch(`${SPREADSHEET_API_URL}?type=works&_t=${Date.now()}`);
         const text = await res.text();
         let data = [];
         if (text.trim().startsWith('<')) {
@@ -69,27 +311,50 @@ const OurWorksPage: React.FC = () => {
           }
         }
         if (Array.isArray(data)) {
-          const formattedWorks: Work[] = data.map((item: any, index: number) => {
-            let photos = [];
-            let documents = [];
-            try {
-              photos = item.photos ? JSON.parse(item.photos) : [];
-            } catch (e) { console.warn("Error parsing photos", e); }
-            try {
-              documents = item.documents ? JSON.parse(item.documents) : [];
-            } catch (e) { console.warn("Error parsing documents", e); }
+          const formattedWorks: Work[] = data
+            .filter((item: any) => item && (item.title || item.description))
+            .map((item: any, index: number) => {
+              let photos: string[] = [];
+              let documents: { name: string; url: string }[] = [];
+              
+              if (Array.isArray(item.photos)) {
+                photos = item.photos;
+              } else if (typeof item.photos === 'string' && item.photos.trim() !== '') {
+                try {
+                  const parsed = JSON.parse(item.photos);
+                  photos = Array.isArray(parsed) ? parsed : [item.photos];
+                } catch (e) { 
+                  photos = item.photos.split(',').map((s: string) => s.trim()).filter(Boolean);
+                }
+              }
 
-            return {
-              id: 1000 + index,
-              title: item.title,
-              date: item.date,
-              description: item.description,
-              photos: photos,
-              videos: item.youtubeLink ? [item.youtubeLink] : [],
-              documents: documents
-            };
-          });
-          setWorks([...WORKS_DATA, ...formattedWorks]);
+              if (Array.isArray(item.documents)) {
+                documents = item.documents;
+              } else if (typeof item.documents === 'string' && item.documents.trim() !== '') {
+                try {
+                  const parsed = JSON.parse(item.documents);
+                  documents = Array.isArray(parsed) ? parsed : [];
+                } catch (e) { 
+                  console.warn("Error parsing documents", e); 
+                }
+              }
+
+              return {
+                id: 1000 + index,
+                title: String(item.title || 'Untitled Work').trim(),
+                date: formatDisplayDate(item.date),
+                description: String(item.description || ''),
+                photos: photos.filter(p => typeof p === 'string' && p.trim() !== ''),
+                videos: item.youtubeLink ? [String(item.youtubeLink).trim()] : [],
+                documents: documents.filter(d => d && d.url)
+              };
+            });
+
+          // Show newest spreadsheet records first, followed by historical catalog
+          const staticWorks = WORKS_DATA.filter(
+            staticItem => !formattedWorks.some(fw => fw.title.toLowerCase() === (staticItem.title || '').trim().toLowerCase())
+          );
+          setWorks([...[...formattedWorks].reverse(), ...staticWorks]);
         }
       } catch (err) {
         console.warn("Failed to fetch works:", err);

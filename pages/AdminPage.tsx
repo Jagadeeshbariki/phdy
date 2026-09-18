@@ -6,6 +6,22 @@ const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLv
 const CLOUDINARY_CLOUD_NAME = 'dbohmpxko';
 const CLOUDINARY_UPLOAD_PRESET = 'phdy_preset'; 
 
+const formatDisplayDate = (dateStr: string | undefined): string => {
+  if (!dateStr) return '';
+  const trimmed = String(dateStr).trim();
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)) return trimmed;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const parts = trimmed.split('-');
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+  const d = new Date(trimmed);
+  if (isNaN(d.getTime())) return trimmed;
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
+}; 
+
 type AdminTab = 'members' | 'accounting' | 'works' | 'joinRequests' | 'users';
 
 interface AdminPageProps {
@@ -57,7 +73,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     if (!SPREADSHEET_API_URL || !loggedInUser) return;
     setIsRefreshing(true);
     try {
-      const res = await fetch(`${SPREADSHEET_API_URL}?type=members`);
+      const res = await fetch(`${SPREADSHEET_API_URL}?type=members&_t=${Date.now()}`, { cache: 'no-store' });
       const text = await res.text();
       let data = [];
       if (text.trim().startsWith('<')) {
@@ -81,7 +97,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     if (!SPREADSHEET_API_URL || !loggedInUser) return;
     setIsRefreshing(true);
     try {
-      const res = await fetch(`${SPREADSHEET_API_URL}?type=accounting`);
+      const res = await fetch(`${SPREADSHEET_API_URL}?type=accounting&_t=${Date.now()}`, { cache: 'no-store' });
       const text = await res.text();
       let data = [];
       if (text.trim().startsWith('<')) {
@@ -105,7 +121,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     if (!SPREADSHEET_API_URL || !loggedInUser) return;
     setIsRefreshing(true);
     try {
-      const res = await fetch(`${SPREADSHEET_API_URL}?type=works`);
+      const res = await fetch(`${SPREADSHEET_API_URL}?type=works&_t=${Date.now()}`, { cache: 'no-store' });
       const text = await res.text();
       let data = [];
       if (text.trim().startsWith('<')) {
@@ -129,7 +145,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     if (!SPREADSHEET_API_URL || !loggedInUser || loggedInUser.role !== 'admin') return;
     setIsRefreshing(true);
     try {
-      const res = await fetch(`${SPREADSHEET_API_URL}?type=join_requests`);
+      const res = await fetch(`${SPREADSHEET_API_URL}?type=join_requests&_t=${Date.now()}`, { cache: 'no-store' });
       const text = await res.text();
       let data = [];
       if (text.trim().startsWith('<')) {
@@ -153,7 +169,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     if (!SPREADSHEET_API_URL || !loggedInUser || loggedInUser.role !== 'admin') return;
     setIsRefreshing(true);
     try {
-      const res = await fetch(`${SPREADSHEET_API_URL}?type=users`);
+      const res = await fetch(`${SPREADSHEET_API_URL}?type=users&_t=${Date.now()}`, { cache: 'no-store' });
       const text = await res.text();
       let data = [];
       if (!text.trim().startsWith('<')) {
@@ -265,8 +281,9 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
     formData.append('resource_type', resourceType);
     
-    // Standard Cloudinary upload endpoint
-    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/upload`, {
+    // Cloudinary upload endpoint - use proper target type in path
+    const targetType = resourceType === 'raw' ? 'raw' : 'image';
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/${targetType}/upload`, {
       method: 'POST',
       body: formData
     });
@@ -342,11 +359,10 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         photoUrls.push(data.secure_url);
       }
 
-      // Upload Documents
+      // Upload Documents (use 'image' so Cloudinary can rasterize PDF pages for viewing without ACL restrictions)
       const docUrls = [];
       for (const file of workDocs) {
-        // Explicitly use 'raw' for documents to ensure they are stored as files
-        const data = await uploadToCloudinary(file, 'raw');
+        const data = await uploadToCloudinary(file, 'image');
         docUrls.push({ name: file.name, url: data.secure_url });
       }
 
@@ -807,29 +823,48 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {spreadsheetWorks.map((w, idx) => (
-                        <tr key={idx}>
-                          <td className="py-4 text-sm font-bold text-gray-500">{w.date}</td>
-                          <td className="py-4 font-bold">{w.title}</td>
-                          <td className="py-4 text-sm text-gray-500">
-                            {w.photos ? JSON.parse(w.photos).length : 0}
-                          </td>
-                          <td className="py-4 text-sm text-gray-500">
-                            {w.documents ? JSON.parse(w.documents).length : 0}
-                          </td>
-                          <td className="py-4 text-right">
-                            <button 
-                              onClick={() => handleDeleteWork(w.title)}
-                              className="text-red-500 font-bold hover:underline text-xs"
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                      {spreadsheetWorks.map((w, idx) => {
+                        let photoCount = 0;
+                        let docCount = 0;
+                        try {
+                          if (Array.isArray(w.photos)) photoCount = w.photos.length;
+                          else if (w.photos && typeof w.photos === 'string' && w.photos.trim() !== '') {
+                            const parsed = JSON.parse(w.photos);
+                            photoCount = Array.isArray(parsed) ? parsed.length : 1;
+                          }
+                        } catch {
+                          photoCount = w.photos ? 1 : 0;
+                        }
+                        try {
+                          if (Array.isArray(w.documents)) docCount = w.documents.length;
+                          else if (w.documents && typeof w.documents === 'string' && w.documents.trim() !== '') {
+                            const parsed = JSON.parse(w.documents);
+                            docCount = Array.isArray(parsed) ? parsed.length : 1;
+                          }
+                        } catch {
+                          docCount = w.documents ? 1 : 0;
+                        }
+
+                        return (
+                          <tr key={idx}>
+                            <td className="py-4 text-sm font-bold text-gray-500">{formatDisplayDate(w.date)}</td>
+                            <td className="py-4 font-bold">{w.title}</td>
+                            <td className="py-4 text-sm text-gray-500">{photoCount}</td>
+                            <td className="py-4 text-sm text-gray-500">{docCount}</td>
+                            <td className="py-4 text-right">
+                              <button 
+                                onClick={() => handleDeleteWork(w.title)}
+                                className="text-red-500 font-bold hover:underline text-xs"
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                       {spreadsheetWorks.length === 0 && (
                         <tr>
-                          <td colSpan={4} className="py-8 text-center text-gray-400 italic">No work records found in spreadsheet.</td>
+                          <td colSpan={5} className="py-8 text-center text-gray-400 italic">No work records found in spreadsheet.</td>
                         </tr>
                       )}
                     </tbody>
