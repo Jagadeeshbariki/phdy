@@ -16,7 +16,7 @@ export interface Document {
 }
 
 export interface Work {
-  id: string | number;
+  id: number;
   title: string;
   description: string;
   date: string;

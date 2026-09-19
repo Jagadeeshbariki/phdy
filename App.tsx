@@ -7,71 +7,63 @@ import ContactPage from './pages/ContactPage';
 import OurWorksPage from './pages/OurWorksPage';
 import AccountingPage from './pages/AccountingPage';
 import AdminPage from './pages/AdminPage';
-import LoginPage from './pages/LoginPage';
 import PHDYInternalPage from './pages/PHDYInternalPage';
 import Footer from './components/Footer';
-import { useFirebase } from './src/context/FirebaseContext';
-import { logout } from './src/lib/firebase';
 
-export type Page = 'home' | 'members' | 'ourworks' | 'accounting' | 'contact' | 'admin' | 'internal' | 'login';
+export type Page = 'home' | 'members' | 'ourworks' | 'accounting' | 'contact' | 'admin' | 'internal';
 
 export interface LoggedInUser {
   email: string;
   role: 'admin' | 'treasurer' | 'phdy_member' | 'user' | string;
-  name?: string;
 }
 
-const hasInternalAccess = (role: string | null) => {
-  if (!role) return false;
-  const r = String(role).toLowerCase();
+const hasInternalAccess = (user: LoggedInUser | null) => {
+  if (!user) return false;
+  const r = String(user.role).toLowerCase();
   return r === 'phdy_member' || r === 'admin' || r === 'treasurer' || r === 'tressurer';
 };
 
-const hasAdminPortalAccess = (role: string | null) => {
-  if (!role) return false;
-  const r = String(role).toLowerCase();
+const hasAdminPortalAccess = (user: LoggedInUser | null) => {
+  if (!user) return false;
+  const r = String(user.role).toLowerCase();
   return r === 'admin' || r === 'treasurer' || r === 'tressurer';
 };
 
 const App: React.FC = () => {
-  const { user, role, loading } = useFirebase();
   const [currentPage, setCurrentPage] = useState<Page>('home');
-
-  const loggedInUser: LoggedInUser | null = user ? {
-    email: user.email || '',
-    role: role || 'user',
-    name: user.displayName || user.email?.split('@')[0] || ''
-  } : null;
+  const [loggedInUser, setLoggedInUser] = useState<LoggedInUser | null>(() => {
+    const saved = sessionStorage.getItem('phdy_admin_session');
+    return saved ? JSON.parse(saved) : null;
+  });
 
   useEffect(() => {
     const handlePopState = () => {
-      let path = window.location.hash.replace('#', '') as Page;
-      
-      // Fallback to pathname if hash is empty (for direct URLs /login etc)
-      if (!path) {
-        const urlPath = window.location.pathname.substring(1) as Page;
-        if (['home', 'members', 'ourworks', 'accounting', 'contact', 'admin', 'internal', 'login'].includes(urlPath)) {
-          path = urlPath;
-        }
-      }
+      const path = window.location.hash.replace('#', '') as Page;
+      const session = sessionStorage.getItem('phdy_admin_session');
+      const user: LoggedInUser | null = session ? JSON.parse(session) : null;
 
       // Gate PHDY Internal: phdy_member, treasurer, or admin only
       if (path === 'internal') {
-        if (!hasInternalAccess(role)) {
+        if (!hasInternalAccess(user)) {
           setCurrentPage('home');
           window.location.hash = 'home';
           return;
         }
       }
 
-      // Gate Admin: admin or treasurer only
-      if (path === 'admin' && !hasAdminPortalAccess(role)) {
-        setCurrentPage('home');
-        window.location.hash = 'home';
+      // Gate Admin: admin or treasurer only (treasurers manage funds, admins manage all)
+      if (path === 'admin' && user && !hasAdminPortalAccess(user)) {
+        if (hasInternalAccess(user)) {
+          setCurrentPage('internal');
+          window.location.hash = 'internal';
+        } else {
+          setCurrentPage('home');
+          window.location.hash = 'home';
+        }
         return;
       }
 
-      if (['home', 'members', 'ourworks', 'accounting', 'contact', 'admin', 'internal', 'login'].includes(path)) {
+      if (['home', 'members', 'ourworks', 'accounting', 'contact', 'admin', 'internal'].includes(path)) {
         setCurrentPage(path);
       } else {
         setCurrentPage('home');
@@ -82,34 +74,47 @@ const App: React.FC = () => {
     handlePopState();
 
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [role]);
+  }, []);
 
   const navigateTo = (page: Page) => {
-    if (page === 'internal' && !hasInternalAccess(role)) {
-      setCurrentPage('home');
-      window.location.hash = 'home';
-    } else if (page === 'admin' && !hasAdminPortalAccess(role)) {
-      setCurrentPage('home');
-      window.location.hash = 'home';
-    } else {
-      setCurrentPage(page);
-      window.location.hash = page;
+    // Gate PHDY Internal
+    if (page === 'internal') {
+      if (!hasInternalAccess(loggedInUser)) {
+        setCurrentPage('home');
+        window.location.hash = 'home';
+        window.scrollTo(0, 0);
+        return;
+      }
     }
+
+    // Gate Admin: admin or treasurer only
+    if (page === 'admin' && loggedInUser && !hasAdminPortalAccess(loggedInUser)) {
+      if (hasInternalAccess(loggedInUser)) {
+        setCurrentPage('internal');
+        window.location.hash = 'internal';
+      } else {
+        setCurrentPage('home');
+        window.location.hash = 'home';
+      }
+      window.scrollTo(0, 0);
+      return;
+    }
+
+    setCurrentPage(page);
+    window.location.hash = page;
     window.scrollTo(0, 0);
   };
 
-  const onLogout = async () => {
-    await logout();
-    navigateTo('home');
+  const onLoginSuccess = (user: LoggedInUser) => {
+    setLoggedInUser(user);
+    sessionStorage.setItem('phdy_admin_session', JSON.stringify(user));
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600"></div>
-      </div>
-    );
-  }
+  const onLogout = () => {
+    setLoggedInUser(null);
+    sessionStorage.removeItem('phdy_admin_session');
+    navigateTo('home');
+  };
 
   const renderPage = () => {
     switch (currentPage) {
@@ -122,15 +127,15 @@ const App: React.FC = () => {
       case 'accounting':
         return <AccountingPage />;
       case 'internal':
-        if (!hasInternalAccess(role)) return <Home onNavigate={navigateTo} />;
-        return <PHDYInternalPage onNavigate={navigateTo} onLogout={onLogout} />;
+        // Protected: Only phdy_member, treasurer, or admin
+        if (!hasInternalAccess(loggedInUser)) {
+          return <Home onNavigate={navigateTo} />;
+        }
+        return <PHDYInternalPage onNavigate={navigateTo} loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onLogout={onLogout} />;
       case 'contact':
         return <ContactPage />;
-      case 'login':
-        return <LoginPage onNavigate={navigateTo} />;
       case 'admin':
-        if (!hasAdminPortalAccess(role)) return <Home onNavigate={navigateTo} />;
-        return <AdminPage onLogout={onLogout} onNavigate={navigateTo} />;
+        return <AdminPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onLogout={onLogout} onNavigate={navigateTo} />;
       default:
         return <Home onNavigate={navigateTo} />;
     }

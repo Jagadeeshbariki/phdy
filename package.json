@@ -11,9 +11,7 @@
     "start": "node dist/server.cjs"
   },
   "dependencies": {
-    "@firebase/eslint-plugin-security-rules": "^0.0.2",
     "express": "^5.2.1",
-    "firebase": "^12.19.0",
     "lucide-react": "^0.575.0",
     "motion": "^12.34.3",
     "react": "^19.2.4",

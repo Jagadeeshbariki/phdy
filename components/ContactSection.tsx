@@ -1,9 +1,8 @@
 
 import React, { useState, useRef } from 'react';
 import { CONTACT_SOCIAL_LINKS } from '../ContactData';
-import { db, handleFirestoreError, OperationType } from '../src/lib/firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
+const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
 const CLOUDINARY_CLOUD_NAME = 'dbohmpxko';
 const CLOUDINARY_UPLOAD_PRESET = 'phdy_preset'; 
 
@@ -63,16 +62,68 @@ const ContactSection: React.FC = () => {
     try {
       const cloudinaryData = await uploadToCloudinary(selectedFile);
       
-      await addDoc(collection(db, 'join_requests'), {
+      const submissionPayload = {
+        action: 'add_join_request',
+        type: 'join_requests',
+        sheet: 'JoinRequests',
+        sheetName: 'JoinRequests',
         fullName: formData.fullName.trim(),
+        FullName: formData.fullName.trim(),
+        name: formData.fullName.trim(),
+        Name: formData.fullName.trim(),
         email: formData.email.trim(),
+        Email: formData.email.trim(),
         phone: formData.phone.trim(),
+        Phone: formData.phone.trim(),
         dob: formData.dob,
+        DOB: formData.dob,
         address: formData.address.trim(),
+        Address: formData.address.trim(),
         reason: formData.reason.trim(),
+        Reason: formData.reason.trim(),
         photoUrl: cloudinaryData.secure_url,
+        PhotoUrl: cloudinaryData.secure_url,
         status: 'In Progress',
-        createdAt: serverTimestamp()
+        Status: 'In Progress',
+        "Request Status": 'In Progress',
+        "RequestStatus": 'In Progress',
+        date: new Date().toISOString().split('T')[0],
+        Date: new Date().toISOString().split('T')[0],
+        timestamp: new Date().toISOString(),
+        Timestamp: new Date().toISOString()
+      };
+
+      try {
+        const localReq = {
+          fullName: formData.fullName.trim(),
+          email: formData.email.trim(),
+          phone: formData.phone.trim(),
+          dob: formData.dob,
+          address: formData.address.trim(),
+          reason: formData.reason.trim(),
+          photoUrl: cloudinaryData.secure_url,
+          status: 'In Progress',
+          date: new Date().toISOString().split('T')[0]
+        };
+        const cached: any[] = JSON.parse(localStorage.getItem('phdy_join_requests_cache') || '[]');
+        const targetEmail = localReq.email.toLowerCase();
+        const targetName = localReq.fullName.toLowerCase();
+        const filtered = cached.filter((c: any) => {
+          const cEmail = String(c.email || '').toLowerCase().trim();
+          const cName = String(c.fullName || c.name || '').toLowerCase().trim();
+          if (targetEmail && cEmail) return cEmail !== targetEmail;
+          return cName !== targetName;
+        });
+        filtered.unshift(localReq);
+        localStorage.setItem('phdy_join_requests_cache', JSON.stringify(filtered));
+        // Notify any active admin page
+        window.dispatchEvent(new Event('phdy_join_requests_updated'));
+      } catch (e) {}
+
+      await fetch(SPREADSHEET_API_URL, {
+        method: 'POST', 
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(submissionPayload),
       });
 
       setIsSubmitting(false);
@@ -88,9 +139,9 @@ const ContactSection: React.FC = () => {
       setSelectedFile(null);
       setPreviewUrl(null);
       setTimeout(() => setSubmitted(false), 5000);
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      handleFirestoreError(err, OperationType.CREATE, 'join_requests');
+      alert("Failed to submit request. Please try again later.");
       setIsSubmitting(false);
     }
   };

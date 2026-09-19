@@ -7,11 +7,6 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // API routes FIRST
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
-  });
-
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -22,7 +17,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    // For Express v5, use '*all' to catch all routes for SPA
+    // In Express v5 app.get('*all') would be needed, but express 4 uses '*'
     app.get('*all', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });

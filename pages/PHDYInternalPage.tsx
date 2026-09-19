@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Page } from '../App';
+import { LoggedInUser, Page } from '../App';
 import { PHDYFundTransaction } from '../types';
-import { INITIAL_PHDY_FUNDS } from '../PHDYFundsData';
+import { INITIAL_PHDY_FUNDS, PHDY_INTERNAL_RESOLUTIONS, PHDY_INTERNAL_ASSETS } from '../PHDYFundsData';
 import { 
   Wallet, 
   ArrowUpRight, 
@@ -9,35 +9,39 @@ import {
   Search, 
   Filter, 
   RefreshCw, 
+  Download, 
   Plus, 
   FileText, 
   Layers, 
   BookOpen, 
   CheckCircle2, 
   AlertCircle, 
+  ExternalLink, 
   HelpCircle, 
   X, 
-  Building2, 
-  KeyRound, 
-  LogOut, 
-  Lock, 
-  ShieldCheck, 
+  CreditCard,
+  Building2,
+  Calendar,
+  DollarSign,
   User,
-  Download,
-  ExternalLink,
-  Trash2,
-  Copy
+  Tag,
+  Lock,
+  ShieldCheck,
+  KeyRound,
+  LogOut,
+  Copy,
+  Trash2
 } from 'lucide-react';
-import { db, handleFirestoreError, OperationType } from '../src/lib/firebase';
-import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp, deleteDoc, doc } from 'firebase/firestore';
-import { useFirebase } from '../src/context/FirebaseContext';
-import { PHDY_INTERNAL_RESOLUTIONS, PHDY_INTERNAL_ASSETS } from '../PHDYFundsData';
 
+const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
 const CLOUDINARY_CLOUD_NAME = 'dbohmpxko';
 const CLOUDINARY_UPLOAD_PRESET = 'phdy_website';
+const CACHE_KEY = 'phdy_internal_funds_cache_v2';
 
 interface PHDYInternalPageProps {
   onNavigate: (page: Page) => void;
+  loggedInUser: LoggedInUser | null;
+  onLoginSuccess?: (user: LoggedInUser) => void;
   onLogout?: () => void;
 }
 
@@ -45,27 +49,37 @@ type InternalSubsection = 'funds' | 'resolutions' | 'assets' | 'guidelines';
 
 const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({ 
   onNavigate, 
+  loggedInUser, 
+  onLoginSuccess, 
   onLogout 
 }) => {
-  const { user: firebaseUser, role: firebaseRole, isAdmin, isTreasurer, loading: firebaseLoading } = useFirebase();
   const [activeSubsection, setActiveSubsection] = useState<InternalSubsection>('funds');
-  const [funds, setFunds] = useState<PHDYFundTransaction[]>(INITIAL_PHDY_FUNDS);
+  const [funds, setFunds] = useState<PHDYFundTransaction[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch (e) {
+        console.warn('Failed to load cached funds:', e);
+      }
+    }
+    return INITIAL_PHDY_FUNDS;
+  });
+
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'All' | 'Credit' | 'Debit'>('All');
   const [filterMonth, setFilterMonth] = useState<string>('All');
   const [filterAmountStatus, setFilterAmountStatus] = useState<'paid_only' | 'all' | 'zero_only'>('paid_only');
+  const [fundViewTab, setFundViewTab] = useState<'transactions' | 'member_summary'>('transactions');
   const [lastSyncTime, setLastSyncTime] = useState<string>('Just now');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isScriptGuideOpen, setIsScriptGuideOpen] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState<string | null>(null);
-  const [fundViewTab, setFundViewTab] = useState<'transactions' | 'member_summary'>('transactions');
-
-  // No-op for legacy sync
-  const fetchFundsFromSheet = async (force: boolean = false) => {
-    console.log("Firestore sync active. Manual sheet sync is deprecated.");
-  };
 
   // Add Transaction Form State
   const [formState, setFormState] = useState({
@@ -83,31 +97,154 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
   const [formSuccess, setFormSuccess] = useState('');
   const [formError, setFormError] = useState('');
 
-  const isAuthorized = Boolean(firebaseUser && (firebaseRole === 'phdy_member' || isAdmin || isTreasurer));
-  const canManageFunds = Boolean(firebaseUser && (isAdmin || isTreasurer));
+  // Member Login Gate States
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  const roleLower = String(loggedInUser?.role || '').toLowerCase();
+  const isAuthorized = Boolean(loggedInUser && (roleLower === 'phdy_member' || roleLower === 'admin' || roleLower === 'treasurer' || roleLower === 'tressurer'));
+  const canManageFunds = Boolean(loggedInUser && (roleLower === 'admin' || roleLower === 'treasurer' || roleLower === 'tressurer'));
+
+  const handleMemberLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError('');
+    setIsLoggingIn(true);
+    try {
+      const res = await fetch(SPREADSHEET_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'login',
+          email: loginEmail.trim(),
+          password: loginPassword
+        })
+      });
+      const responseText = await res.text();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (err) {
+        throw new Error("Unable to parse server response. Check Google Apps Script deployment.");
+      }
+
+      if (data.status === 'success' && data.user) {
+        const uRole = String(data.user.role || '').toLowerCase();
+        if (uRole === 'admin' || uRole === 'phdy_member' || uRole === 'treasurer' || uRole === 'tressurer') {
+          if (onLoginSuccess) {
+            onLoginSuccess({ email: data.user.email, role: data.user.role });
+          }
+        } else {
+          setLoginError("Access denied. Your account is registered, but not yet verified as an approved PHDY Member or Treasurer by the Admin.");
+        }
+      } else {
+        setLoginError(data.message || 'Invalid credentials. Please verify your email and password.');
+      }
+    } catch (err: any) {
+      setLoginError(err.message || 'Network error while attempting to sign in. Please try again.');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  // Fetch from Google Apps Script
+  const fetchFundsFromSheet = async (showSyncIndicator = false) => {
+    if (showSyncIndicator) setIsSyncing(true);
+    else setIsLoading(true);
+
+    const timeoutMs = 8000;
+    try {
+      const robustFetch = async () => {
+        // 1. Try GET
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), timeoutMs);
+          const res = await fetch(`${SPREADSHEET_API_URL}?type=phdy_funds&_t=${Date.now()}`, { 
+            signal: controller.signal,
+            cache: 'no-store'
+          });
+          clearTimeout(timer);
+          const text = await res.text();
+          if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+            const parsed = JSON.parse(text);
+            const data = Array.isArray(parsed) ? parsed : (parsed.data || []);
+            if (data.length > 0) return data;
+          }
+        } catch (e) {}
+
+        // 2. Try POST fallback
+        try {
+          const res = await fetch(SPREADSHEET_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'get_phdy_funds', type: 'phdy_funds' })
+          });
+          const text = await res.text();
+          if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+            const parsed = JSON.parse(text);
+            return Array.isArray(parsed) ? parsed : (parsed.data || []);
+          }
+        } catch (e) {}
+        return [];
+      };
+
+      const data = await robustFetch();
+
+      // Check if data is valid Phdy_funds records
+      if (Array.isArray(data) && data.length > 0) {
+        const parsedFunds: PHDYFundTransaction[] = data.map((item, idx) => {
+          const rawAmount = item.Amount ?? item.amount ?? item.Rupees ?? item.rupees ?? item['Amount (Rs)'] ?? item['Amount(Rs)'] ?? 0;
+          const cleanAmount = typeof rawAmount === 'number' 
+            ? rawAmount 
+            : parseFloat(String(rawAmount).replace(/[^0-9.-]+/g, '')) || 0;
+
+          const rawType = item.Type ?? item.type ?? item['Transaction Type'] ?? item['Credit/Debit'] ?? (cleanAmount < 0 ? 'Debit' : 'Credit');
+          const normalizedType = String(rawType).toLowerCase().includes('deb') || String(rawType).toLowerCase().includes('exp')
+            ? 'Debit' 
+            : 'Credit';
+
+          const rawDate = String(item.Date ?? item.date ?? item.Timestamp ?? item.timestamp ?? '').trim();
+          let formattedDate = rawDate;
+          if (rawDate && rawDate.includes('-') && !isNaN(new Date(rawDate).getTime())) {
+            try {
+              formattedDate = new Date(rawDate).toISOString().split('T')[0];
+            } catch {}
+          }
+
+          const rawName = String(item.Name ?? item.name ?? item.Contributor ?? item.contributor ?? item.Donor ?? item.donor ?? item.Person ?? '').trim();
+
+          return {
+            id: item.Id ?? item.id ?? item.TxnID ?? `FND-${1001 + idx}`,
+            date: formattedDate || 'General',
+            name: rawName || 'General Youth Fund',
+            type: normalizedType,
+            amount: Math.abs(cleanAmount),
+            purpose: item.Purpose ?? item.purpose ?? item.Description ?? item.description ?? item.Reason ?? 'PHDY Donation',
+            category: item.Category ?? item.category ?? 'General Category',
+            mode: item.Mode ?? item.mode ?? item['Payment Mode'] ?? item.PaymentMode ?? 'UPI',
+            receiptUrl: item.BillLink ?? item.billLink ?? item.Receipt ?? item.receipt ?? item.Proof ?? item.Bill ?? '',
+            raw: item
+          };
+        });
+
+        setFunds(parsedFunds);
+        setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify(parsedFunds));
+        } catch {}
+      }
+    } catch (err) {
+      console.warn("Failed to fetch Phdy_funds from spreadsheet:", err);
+    } finally {
+      setIsLoading(false);
+      setIsSyncing(false);
+    }
+  };
 
   useEffect(() => {
-    if (!isAuthorized) return;
-    
-    setIsLoading(true);
-    const q = query(collection(db, 'phdy_funds'), orderBy('date', 'desc'));
-    const unsub = onSnapshot(q, (snapshot) => {
-      const fetchedFunds = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as PHDYFundTransaction[];
-      
-      // Combine with initial data if needed, or just use Firestore data
-      setFunds(fetchedFunds.length > 0 ? fetchedFunds : INITIAL_PHDY_FUNDS);
-      setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-      setIsLoading(false);
-    }, (err) => {
-      handleFirestoreError(err, OperationType.LIST, 'phdy_funds');
-      setIsLoading(false);
-    });
-
-    return () => unsub();
-  }, [isAuthorized]);
+    fetchFundsFromSheet();
+  }, []);
 
   // Filter calculations: Extract unique months/periods
   const availableMonths = useMemo(() => {
@@ -231,24 +368,17 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
   }, [funds]);
 
   // Upload file to Cloudinary
-  const uploadToCloudinary = async (file: File, resourceType: 'image' | 'raw' | 'auto' = 'auto') => {
+  const uploadReceipt = async (file: File): Promise<string> => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
-    formData.append('resource_type', resourceType);
-    
-    const targetType = resourceType === 'raw' ? 'raw' : 'image';
-    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/${targetType}/upload`, {
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`, {
       method: 'POST',
       body: formData
     });
-    
-    if (!res.ok) {
-      const errorData = await res.json();
-      console.error('Cloudinary upload error:', errorData);
-      throw new Error('Cloudinary upload failed');
-    }
-    return await res.json();
+    if (!res.ok) throw new Error("Receipt upload to Cloudinary failed");
+    const json = await res.json();
+    return json.secure_url;
   };
 
   // Handle Add Transaction Submit
@@ -270,11 +400,11 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
     try {
       let receiptUrl = formState.billLink.trim();
       if (formFile) {
-        const data = await uploadToCloudinary(formFile, 'auto');
-        receiptUrl = data.secure_url;
+        receiptUrl = await uploadReceipt(formFile);
       }
 
-      await addDoc(collection(db, 'phdy_funds'), {
+      const newTxn: PHDYFundTransaction = {
+        id: `FND-${Date.now().toString().slice(-4)}`,
         date: formState.date,
         name: formState.name.trim(),
         type: formState.type,
@@ -282,9 +412,36 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
         purpose: formState.purpose.trim(),
         category: formState.category,
         mode: formState.mode,
-        receiptUrl: receiptUrl,
-        createdAt: serverTimestamp()
-      });
+        receiptUrl: receiptUrl
+      };
+
+      // 1. Save to Google Apps Script POST
+      try {
+        await fetch(SPREADSHEET_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'add_phdy_fund',
+            Date: newTxn.date,
+            Name: newTxn.name,
+            Type: newTxn.type,
+            Amount: newTxn.amount,
+            Purpose: newTxn.purpose,
+            Category: newTxn.category,
+            Mode: newTxn.mode,
+            BillLink: newTxn.receiptUrl
+          })
+        });
+      } catch (err) {
+        console.warn("Could not post to Apps Script directly, adding locally:", err);
+      }
+
+      // 2. Add to local state immediately
+      const updated = [newTxn, ...funds];
+      setFunds(updated);
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify(updated));
+      } catch {}
 
       setFormSuccess("Fund transaction recorded successfully!");
       setTimeout(() => {
@@ -304,8 +461,7 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
       }, 1500);
 
     } catch (err: any) {
-      setFormError("Failed to record transaction.");
-      handleFirestoreError(err, OperationType.CREATE, 'phdy_funds');
+      setFormError(err.message || "Failed to record transaction.");
     } finally {
       setFormSubmitting(false);
     }
@@ -320,11 +476,27 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
     if (!window.confirm(`Are you sure you want to delete fund entry for "${txn.name}" (₹${txn.amount})?`)) return;
 
     try {
-      await deleteDoc(doc(db, 'phdy_funds', txn.id));
-      alert("Fund entry deleted successfully.");
+      await fetch(SPREADSHEET_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'delete_phdy_fund',
+          Id: txn.id,
+          Name: txn.name,
+          Purpose: txn.purpose,
+          Date: txn.date
+        })
+      });
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `phdy_funds/${txn.id}`);
+      console.warn("Spreadsheet delete request failed:", err);
     }
+
+    const updated = funds.filter(f => f.id !== txn.id);
+    setFunds(updated);
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(updated));
+    } catch {}
+    alert("Fund entry deleted successfully.");
   };
 
   // Export to CSV
@@ -353,35 +525,150 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
   };
 
   // If the user is not a verified PHDY Member or Admin, show the access barrier
-  if (!isAuthorized && !firebaseLoading) {
+  if (!isAuthorized) {
     return (
-      <div className="animate-fadeIn min-h-[80vh] bg-slate-50 flex items-center justify-center px-4">
-        <div className="max-w-md w-full bg-white rounded-[32px] p-8 md:p-10 shadow-2xl border border-orange-100 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 mb-6 mx-auto shadow-inner">
-            <Lock className="w-8 h-8 stroke-[2.5]" />
+      <div className="animate-fadeIn min-h-screen bg-slate-50 pb-20">
+        {/* Top Banner Header */}
+        <div className="bg-gradient-to-r from-orange-700 via-orange-600 to-amber-600 text-white pt-10 pb-24 px-4 shadow-xl border-b border-orange-500/30">
+          <div className="max-w-7xl mx-auto text-center md:text-left">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/15 backdrop-blur-md rounded-full text-white text-xs font-black uppercase tracking-wider mb-3 border border-white/20">
+              <Lock className="w-3.5 h-3.5 text-amber-300" />
+              <span>PHDY Internal Portal &bull; Restricted Section</span>
+            </div>
+            <h1 className="text-3xl md:text-5xl font-black tracking-tight text-white">
+              Pedda Harivanam Youth Internal
+            </h1>
+            <p className="mt-2 text-orange-100 text-sm md:text-base max-w-2xl leading-relaxed">
+              Confidential treasury balances, Phdy_funds transaction ledger, executive resolutions, and community asset records.
+            </p>
           </div>
+        </div>
 
-          <h2 className="text-2xl font-black text-gray-900 uppercase tracking-tight mb-3">
-            PHDY Internal Portal
-          </h2>
-          <p className="text-xs text-gray-500 mb-8 leading-relaxed">
-            This internal portal is reserved exclusively for registered members and administrators of <strong>Pedda Harivanam Development Youth</strong>. Please sign in to continue.
-          </p>
+        {/* Members Only Barrier Container */}
+        <div className="max-w-md mx-auto px-4 -mt-12">
+          <div className="bg-white rounded-[32px] p-8 md:p-10 shadow-2xl border border-orange-100 relative overflow-hidden">
+            <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 mb-6 mx-auto shadow-inner">
+              <Lock className="w-8 h-8 stroke-[2.5]" />
+            </div>
 
-          <button
-            onClick={() => onNavigate('login')}
-            className="w-full py-4 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-black uppercase tracking-wider text-xs transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2"
-          >
-            <ShieldCheck className="w-4 h-4 stroke-[2.5]" />
-            <span>Go to Sign In Page</span>
-          </button>
+            <div className="text-center mb-8">
+              <span className="text-[10px] font-black uppercase tracking-widest text-amber-700 bg-amber-100 px-3 py-1 rounded-full">
+                Members Only Access
+              </span>
+              <h2 className="text-2xl font-black text-gray-900 uppercase tracking-tight mt-3">
+                PHDY Member Login
+              </h2>
+              <p className="text-xs text-gray-500 mt-2 leading-relaxed">
+                This internal portal is reserved exclusively for registered members and administrators of <strong className="text-gray-700">Pedda Harivanam Development Youth</strong>. Please sign in to continue.
+              </p>
+            </div>
+
+            {loginError && (
+              <div className="mb-6 p-4 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs font-medium flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-red-500" />
+                <div>
+                  <p className="font-bold">Authentication Failed</p>
+                  <p className="mt-0.5 text-[11px] text-red-600">{loginError}</p>
+                </div>
+              </div>
+            )}
+
+            <form onSubmit={handleMemberLogin} className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-widest text-gray-500 mb-1.5">
+                  Member Email Address
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                  <input
+                    required
+                    type="email"
+                    placeholder="member@phdy.org"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    className="w-full pl-11 pr-4 py-3.5 rounded-xl bg-gray-50 border border-gray-200 text-sm font-medium outline-none focus:ring-2 focus:ring-orange-500 focus:bg-white transition-all"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-widest text-gray-500 mb-1.5">
+                  Password
+                </label>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                  <input
+                    required
+                    type="password"
+                    placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    className="w-full pl-11 pr-4 py-3.5 rounded-xl bg-gray-50 border border-gray-200 text-sm font-medium outline-none focus:ring-2 focus:ring-orange-500 focus:bg-white transition-all"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoggingIn}
+                className="w-full py-4 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white rounded-xl font-black uppercase tracking-wider text-xs transition-all shadow-lg shadow-orange-500/20 active:scale-95 flex items-center justify-center gap-2 mt-2"
+              >
+                {isLoggingIn ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <span>Verifying Credentials...</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-4 h-4 stroke-[2.5]" />
+                    <span>Sign In as PHDY Member</span>
+                  </>
+                )}
+              </button>
+            </form>
+
+            <div className="mt-8 pt-6 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+              <button
+                type="button"
+                onClick={() => onNavigate('admin')}
+                className="text-orange-600 hover:underline font-bold text-[11px]"
+              >
+                Forgot Password / Reset OTP &rarr;
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigate('contact')}
+                className="text-gray-500 hover:text-orange-600 font-bold text-[11px]"
+              >
+                Apply for Membership &rarr;
+              </button>
+            </div>
+
+            <div className="mt-8 p-4 bg-amber-50/70 rounded-2xl border border-amber-100">
+              <h4 className="text-[11px] font-black uppercase tracking-wider text-amber-900 mb-2 flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5 text-amber-600" />
+                Protected Content in This Section:
+              </h4>
+              <ul className="text-[11px] text-amber-800 space-y-1 font-medium">
+                <li className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                  <strong>PHDY Funds:</strong> Inflows, outflows, dues & reserves
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                  <strong>Resolutions:</strong> General body meeting minutes
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                  <strong>Asset Inventory:</strong> Sound systems, lighting & sports kits
+                </li>
+              </ul>
+            </div>
+          </div>
         </div>
       </div>
     );
   }
-
-  const roleLower = firebaseRole?.toLowerCase() || '';
-  const loggedInUser = firebaseUser;
 
   return (
     <div className="animate-fadeIn min-h-screen bg-slate-50/50 pb-20">
