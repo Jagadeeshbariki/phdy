@@ -117,9 +117,9 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, loggedInUser, 
             </div>
           ) : (
             <button
-              onClick={() => onNavClick('admin' as Page)}
+              onClick={() => onNavClick('login' as Page)}
               className={`ml-4 px-6 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-lg shadow-orange-200 ${
-                currentPage === 'admin' ? 'ring-4 ring-orange-100' : ''
+                currentPage === 'login' ? 'ring-4 ring-orange-100' : ''
               }`}
             >
               Sign In
@@ -199,7 +199,7 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, loggedInUser, 
                 </div>
               ) : (
                 <button
-                  onClick={() => handleMobileNavClick('admin' as Page)}
+                  onClick={() => handleMobileNavClick('login' as Page)}
                   className="w-full py-4 bg-orange-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-orange-200"
                 >
                   Sign In

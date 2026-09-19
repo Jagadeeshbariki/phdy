@@ -2,13 +2,13 @@
 import React, { useState, useEffect } from 'react';
 import { WORKS_DATA } from '../constants';
 import { Work } from '../types';
-
-const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
+import { db, handleFirestoreError, OperationType } from '../src/lib/firebase';
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 
 const isCloudinaryUrl = (url: string) => {
   return typeof url === 'string' && url.includes('cloudinary.com');
 };
-
+// ... rest of utility functions ...
 const getCloudinaryPageImageUrl = (url: string, page: number = 1): string => {
   if (!isCloudinaryUrl(url)) return url;
   
@@ -343,18 +343,7 @@ const parseVideoOrLiveLink = (rawLink: string, currentOrigin: string): ParsedVid
 const OurWorksPage: React.FC = () => {
   const [selectedWork, setSelectedWork] = useState<Work | null>(null);
   const [origin, setOrigin] = useState('');
-  const [works, setWorks] = useState<Work[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const cached = sessionStorage.getItem('phdy_works_cache');
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-        }
-      } catch (e) {}
-    }
-    return WORKS_DATA;
-  });
+  const [works, setWorks] = useState<Work[]>(WORKS_DATA);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -363,116 +352,36 @@ const OurWorksPage: React.FC = () => {
       setOrigin(window.location.origin);
     }
 
-    const fetchWorks = async () => {
-      const timeoutMs = 8000;
-      try {
-        const robustFetch = async () => {
-          // 1. Try GET
-          try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), timeoutMs);
-            const res = await fetch(`${SPREADSHEET_API_URL}?type=works&_t=${Date.now()}`, { 
-              signal: controller.signal,
-              cache: 'no-store'
-            });
-            clearTimeout(timer);
-            const text = await res.text();
-            if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
-              const parsed = JSON.parse(text);
-              const data = Array.isArray(parsed) ? parsed : (parsed.data || []);
-              if (data.length > 0) return data;
-            }
-          } catch (e) {}
-
-          // 2. Try POST fallback
-          try {
-            const res = await fetch(SPREADSHEET_API_URL, {
-              method: 'POST',
-              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-              body: JSON.stringify({ action: 'get_works', type: 'works' })
-            });
-            const text = await res.text();
-            if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
-              const parsed = JSON.parse(text);
-              return Array.isArray(parsed) ? parsed : (parsed.data || []);
-            }
-          } catch (e) {}
-          return [];
+    setLoading(true);
+    
+    const q = query(collection(db, 'works'), orderBy('createdAt', 'desc'));
+    const unsub = onSnapshot(q, (snapshot) => {
+      const firestoreWorks: Work[] = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id as any,
+          title: data.title || '',
+          date: data.date || '',
+          description: data.description || '',
+          photos: data.imageUrls || data.photos || [],
+          videos: data.videos || (data.youtubeLink ? [data.youtubeLink] : []),
+          documents: data.docUrls || data.documents || []
         };
+      });
 
-        const data = await robustFetch();
-        if (Array.isArray(data)) {
-          const formattedWorks: Work[] = data
-            .filter((item: any) => item && (item.title || item.description))
-            .map((item: any, index: number) => {
-              let photos: string[] = [];
-              let documents: { name: string; url: string }[] = [];
-              
-              if (Array.isArray(item.photos)) {
-                photos = item.photos;
-              } else if (typeof item.photos === 'string' && item.photos.trim() !== '') {
-                try {
-                  const parsed = JSON.parse(item.photos);
-                  photos = Array.isArray(parsed) ? parsed : [item.photos];
-                } catch (e) { 
-                  photos = item.photos.split(',').map((s: string) => s.trim()).filter(Boolean);
-                }
-              }
+      // Merge with static
+      const staticWorks = WORKS_DATA.filter(
+        sw => !firestoreWorks.some(fw => fw.title.toLowerCase() === (sw.title || '').toLowerCase())
+      );
+      
+      setWorks([...firestoreWorks, ...staticWorks]);
+      setLoading(false);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'works');
+      setLoading(false);
+    });
 
-              if (Array.isArray(item.documents)) {
-                documents = item.documents;
-              } else if (typeof item.documents === 'string' && item.documents.trim() !== '') {
-                try {
-                  const parsed = JSON.parse(item.documents);
-                  documents = Array.isArray(parsed) ? parsed : [];
-                } catch (e) { 
-                  console.warn("Error parsing documents", e); 
-                }
-              }
-
-              // Support multiple column names for live link and YouTube video
-              const rawVideo = item.youtubeLink || item.youtube_link || item.liveLink || item.live_link || item.video || item.videos || item['Live Link'] || item['YouTube Link'];
-              let videoList: string[] = [];
-              if (Array.isArray(rawVideo)) {
-                videoList = rawVideo.map(v => String(v).trim()).filter(Boolean);
-              } else if (typeof rawVideo === 'string' && rawVideo.trim() !== '') {
-                try {
-                  const parsed = JSON.parse(rawVideo);
-                  videoList = Array.isArray(parsed) ? parsed.map(v => String(v).trim()).filter(Boolean) : [rawVideo.trim()];
-                } catch (e) {
-                  videoList = [rawVideo.trim()];
-                }
-              }
-
-              return {
-                id: 1000 + index,
-                title: String(item.title || 'Untitled Work').trim(),
-                date: formatDisplayDate(item.date),
-                description: String(item.description || ''),
-                photos: photos.filter(p => typeof p === 'string' && p.trim() !== ''),
-                videos: videoList,
-                documents: documents.filter(d => d && d.url)
-              };
-            });
-
-          // Show newest spreadsheet records first, followed by historical catalog
-          const staticWorks = WORKS_DATA.filter(
-            staticItem => !formattedWorks.some(fw => fw.title.toLowerCase() === (staticItem.title || '').trim().toLowerCase())
-          );
-          const combinedWorks = [...[...formattedWorks].reverse(), ...staticWorks];
-          setWorks(combinedWorks);
-          try {
-            sessionStorage.setItem('phdy_works_cache', JSON.stringify(combinedWorks));
-          } catch (e) {}
-        }
-      } catch (err) {
-        console.warn("Failed to fetch works:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchWorks();
+    return () => unsub();
   }, []);
 
   const handleDownload = async (url: string, filename: string) => {

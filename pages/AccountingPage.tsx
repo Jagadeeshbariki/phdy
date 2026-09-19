@@ -2,8 +2,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ACCOUNT_DATA, YearData, Transaction } from '../AccountData';
 import { getFinancialYearsList, getCurrentFinancialYear } from '../types';
-
-const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
+import { db, handleFirestoreError, OperationType } from '../src/lib/firebase';
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 
 const FINANCIAL_MONTH_ORDER = [
   "April", "May", "June", "July", "August", "September", 
@@ -53,52 +53,22 @@ const AccountingPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchDynamicAccounting = async () => {
-      const timeoutMs = 8000;
-      try {
-        const robustFetch = async () => {
-          // 1. Try GET
-          try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), timeoutMs);
-            const res = await fetch(`${SPREADSHEET_API_URL}?type=accounting&_t=${Date.now()}`, { 
-              signal: controller.signal,
-              cache: 'no-store'
-            });
-            clearTimeout(timer);
-            const text = await res.text();
-            if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
-              const parsed = JSON.parse(text);
-              const data = Array.isArray(parsed) ? parsed : (parsed.data || []);
-              if (data.length > 0) return data;
-            }
-          } catch (e) {}
+    setLoading(true);
+    
+    const q = query(collection(db, 'accounting'), orderBy('createdAt', 'desc'));
+    const unsub = onSnapshot(q, (snapshot) => {
+      const records = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setDynamicRecords(records);
+      setLoading(false);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'accounting');
+      setLoading(false);
+    });
 
-          // 2. Try POST fallback
-          try {
-            const res = await fetch(SPREADSHEET_API_URL, {
-              method: 'POST',
-              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-              body: JSON.stringify({ action: 'get_accounting', type: 'accounting' })
-            });
-            const text = await res.text();
-            if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
-              const parsed = JSON.parse(text);
-              return Array.isArray(parsed) ? parsed : (parsed.data || []);
-            }
-          } catch (e) {}
-          return [];
-        };
-
-        const data = await robustFetch();
-        setDynamicRecords(data);
-      } catch (err) {
-        console.warn("Failed to load dynamic accounting:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchDynamicAccounting();
+    return () => unsub();
   }, []);
 
   // Calculate current month and financial year for "Recent" filtering
@@ -146,14 +116,22 @@ const AccountingPage: React.FC = () => {
         pdfUrl: BillLink
       };
 
+      // Deduplicate: Check if this transaction already exists from static data
+      const isDuplicate = (list: Transaction[]) => 
+        list.some(t => t.description === Description && t.pdfUrl === BillLink);
+
       if (Type === 'No Income') {
         monthObj.details.noIncome = true;
       } else if (Type === 'No Expenditure') {
         monthObj.details.noExpenditure = true;
       } else if (Type === 'Income') {
-        monthObj.details.Income.push(newTransaction);
+        if (!isDuplicate(monthObj.details.Income)) {
+          monthObj.details.Income.push(newTransaction);
+        }
       } else if (Type === 'Expenditure') {
-        monthObj.details.Expenditure.push(newTransaction);
+        if (!isDuplicate(monthObj.details.Expenditure)) {
+          monthObj.details.Expenditure.push(newTransaction);
+        }
       }
     });
 

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { CheckCircle2, ShieldCheck, UserCheck, Search, Sparkles, MapPin, Clock } from 'lucide-react';
+import { CheckCircle2, ShieldCheck, UserCheck, Search, MapPin, Clock } from 'lucide-react';
 import aboutConfigData from '../public/AboutConfig.json';
-
-const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
+import { db, handleFirestoreError, OperationType } from '../src/lib/firebase';
+import { collection, onSnapshot, query, orderBy, where } from 'firebase/firestore';
 
 export interface DisplayMember {
   id: string;
@@ -18,7 +18,7 @@ export interface DisplayMember {
   address?: string;
   email?: string;
   phone?: string;
-  source: 'join_request' | 'user' | 'legacy' | 'join_request_pending';
+  source: 'join_request' | 'user' | 'legacy' | 'join_request_pending' | 'firestore';
 }
 
 const MembersList: React.FC = () => {
@@ -27,322 +27,101 @@ const MembersList: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'approved' | 'founding' | 'join_requests'>('all');
 
-  const fetchAllMembers = async () => {
+  useEffect(() => {
+    setLoading(true);
+    
+    // 1. Get static legacy founding members
+    const config = Array.isArray(aboutConfigData) ? aboutConfigData[0] : aboutConfigData;
+    const legacyMembers: DisplayMember[] = (config?.members || []).map((m: any, idx: number) => ({
+      id: m["Id.No"] || m.id || `LEGACY-${idx}`,
+      name: m.Name || m.name || '',
+      role: 'Founding Member',
+      age: String(m.Age || m.age || ''),
+      qualification: String(m.Qualification || m.qualification || 'Nill'),
+      motivation: String(m.Motivation || m.motivation || 'Dedicated to the progress of Pedda Harivanam.'),
+      image: m.ImageURL || m.image || 'https://cdn-icons-png.flaticon.com/128/17798/17798443.png',
+      status: 'Approved',
+      statusLabel: 'Founding Member',
+      address: 'Pedda Harivanam',
+      source: 'legacy'
+    }));
+
+    const unsubscribers: (() => void)[] = [];
+
+    // 2. Listen to Members collection
     try {
-      setLoading(true);
+      const qMembers = query(collection(db, 'members'), orderBy('createdAt', 'desc'));
+      const unsubMembers = onSnapshot(qMembers, (snapshot) => {
+        const firestoreMembers: DisplayMember[] = snapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: data.idNo || doc.id,
+            name: data.name || '',
+            role: data.role || 'PHDY Member',
+            age: String(data.age || ''),
+            qualification: data.qualification || 'Graduate',
+            motivation: data.motivation || '',
+            image: data.imageUrl || data.image || 'https://cdn-icons-png.flaticon.com/128/17798/17798443.png',
+            status: data.status || 'Approved',
+            statusLabel: data.status === 'Approved' ? 'Approved Member' : 'In Progress',
+            address: data.address || 'Pedda Harivanam',
+            email: data.email || '',
+            phone: data.phone || '',
+            source: 'firestore'
+          };
+        });
 
-      // 1. Get static legacy founding members
-      const config = Array.isArray(aboutConfigData) ? aboutConfigData[0] : aboutConfigData;
-      const legacyMembers: any[] = config?.members || [];
+        // 3. Listen to Join Requests - Only show In Progress ones publicly
+        const qJoin = query(
+          collection(db, 'join_requests'), 
+          where('status', '==', 'In Progress'),
+          orderBy('createdAt', 'desc')
+        );
+        const unsubJoin = onSnapshot(qJoin, (joinSnapshot) => {
+          const joinRequests: DisplayMember[] = joinSnapshot.docs
+            .map(doc => {
+              const data = doc.data();
+              return {
+                id: doc.id,
+                name: data.fullName || '',
+                role: 'Membership Applicant',
+                age: String(data.age || ''),
+                qualification: data.qualification || 'Applicant',
+                motivation: data.reason || '',
+                image: data.photoUrl || 'https://cdn-icons-png.flaticon.com/128/17798/17798443.png',
+                status: 'In Progress',
+                statusLabel: 'In Progress',
+                address: data.address || 'Pedda Harivanam',
+                email: data.email || '',
+                phone: data.phone || '',
+                source: 'join_request_pending'
+              };
+            });
 
-      // 2. Fetch Join Requests from Spreadsheet (looking for status === 'Approved')
-      let spreadsheetJoinRequests: any[] = [];
-      let spreadsheetUsers: any[] = [];
-      let spreadsheetDirectMembers: any[] = [];
-
-      if (SPREADSHEET_API_URL && !SPREADSHEET_API_URL.includes('YOUR_GOOGLE_APPS_SCRIPT_URL')) {
-        const timeoutMs = 6000;
-        
-        // Parallel requests for join requests, users, and fallback members
-        const fetchWithTimeout = async (url: string, params?: Record<string, string>) => {
-          try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), timeoutMs);
-            const res = await fetch(url, { signal: controller.signal, cache: 'no-store' });
-            clearTimeout(timer);
-            const text = await res.text();
-            const data = parse(text);
-            if (data && data.length > 0) return data;
-          } catch (e) {}
-
-          // Fallback to POST
-          if (params) {
-            try {
-              const res = await fetch(SPREADSHEET_API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({ action: `get_${params.type}`, ...params })
-              });
-              const text = await res.text();
-              return parse(text);
-            } catch (e) {}
-          }
-          return [];
-        };
-
-        const parse = (text: string) => {
-          if (!text || text.trim().startsWith('<')) return [];
-          try {
-            const parsed = JSON.parse(text);
-            if (Array.isArray(parsed)) return parsed;
-            if (Array.isArray(parsed.data)) return parsed.data;
-            if (Array.isArray(parsed.requests)) return parsed.requests;
-            if (Array.isArray(parsed.users)) return parsed.users;
-            if (Array.isArray(parsed.records)) return parsed.records;
-            return [];
-          } catch (e) { return []; }
-        };
-
-        const [joinData, usersData, membersData] = await Promise.all([
-          fetchWithTimeout(`${SPREADSHEET_API_URL}?type=join_requests&sheet=JoinRequests&_t=${Date.now()}`, { type: 'join_requests', sheet: 'JoinRequests' }),
-          fetchWithTimeout(`${SPREADSHEET_API_URL}?type=users&_t=${Date.now()}`, { type: 'users' }),
-          fetchWithTimeout(`${SPREADSHEET_API_URL}?type=members&_t=${Date.now()}`, { type: 'members' })
-        ]);
-
-        spreadsheetJoinRequests = joinData;
-        spreadsheetUsers = usersData;
-        spreadsheetDirectMembers = membersData;
-      }
-
-      // 3. Merge Local Storage cache
-      let cachedRequests: any[] = [];
-      let cachedUsers: any[] = [];
-      try {
-        const savedReqs = localStorage.getItem('phdy_join_requests_cache');
-        if (savedReqs) cachedRequests = JSON.parse(savedReqs);
-      } catch (e) {}
-
-      try {
-        const savedUsers = localStorage.getItem('phdy_registered_users_list');
-        if (savedUsers) cachedUsers = JSON.parse(savedUsers);
-      } catch (e) {}
-
-      // Combine join requests (spreadsheet + local cache)
-      const allJoinRequestsMap = new Map<string, any>();
-      cachedRequests.forEach(r => {
-        if (r) {
-          const key = String(r.email || r.fullName || '').toLowerCase().trim();
-          if (key) allJoinRequestsMap.set(key, r);
-        }
-      });
-      spreadsheetJoinRequests.forEach(r => {
-        if (r) {
-          const email = r.Email || r.email || '';
-          const fullName = r.FullName || r.fullName || r.Name || r.name || '';
-          const key = String(email || fullName).toLowerCase().trim();
-          if (key) {
-            const existing = allJoinRequestsMap.get(key);
-            allJoinRequestsMap.set(key, { ...existing, ...r });
-          }
-        }
-      });
-
-      // Filter for approved join requests
-      const approvedJoinRequests = Array.from(allJoinRequestsMap.values()).filter(r => {
-        const st = String(r.Status || r.status || r['Request Status'] || r.RequestStatus || '').trim().toLowerCase();
-        return st === 'approved' || st === 'accept' || st === 'accepted';
-      });
-
-      // Filter for pending join requests (In Progress)
-      const inProgressJoinRequests = Array.from(allJoinRequestsMap.values()).filter(r => {
-        const st = String(r.Status || r.status || r['Request Status'] || r.RequestStatus || '').trim().toLowerCase();
-        return st === '' || st === 'in progress' || st === 'pending';
-      });
-
-      // Combine users (spreadsheet + local cache)
-      const allUsersMap = new Map<string, any>();
-      cachedUsers.forEach(u => {
-        if (u) {
-          const key = String(u.email || u.name || '').toLowerCase().trim();
-          if (key) allUsersMap.set(key, u);
-        }
-      });
-      spreadsheetUsers.forEach(u => {
-        if (u) {
-          const email = u.Email || u.email || '';
-          const name = u.Name || u.name || '';
-          const key = String(email || name).toLowerCase().trim();
-          if (key) {
-            const existing = allUsersMap.get(key);
-            allUsersMap.set(key, { ...existing, ...u });
-          }
-        }
-      });
-
-      const activeUsers = Array.from(allUsersMap.values()).filter(u => {
-        const st = String(u.Status || u.status || '').trim().toLowerCase();
-        const role = String(u.Role || u.role || '').trim().toLowerCase();
-        return st === 'active' || st === 'approved' || role === 'phdy_member' || role === 'admin' || role === 'treasurer';
-      });
-
-      // 4. Assemble the final Master Members list
-      const membersMap = new Map<string, DisplayMember>();
-      let idCounter = 1;
-
-      // A. Add founding/legacy members first
-      legacyMembers.forEach((m: any) => {
-        const name = String(m.Name || m.name || '').trim();
-        const key = name.toLowerCase();
-        if (key) {
-          const idStr = String(m["Id.No"] || m["id"] || idCounter++);
-          membersMap.set(key, {
-            id: idStr,
-            name: name,
-            role: 'Founding Member',
-            age: String(m.Age || m.age || ''),
-            qualification: String(m.Qualification || m.qualification || 'Nill'),
-            motivation: String(m.Motivation || m.motivation || 'Dedicated to the progress and empowerment of Pedda Harivanam village.'),
-            image: m.ImageURL || m.image || 'https://cdn-icons-png.flaticon.com/128/17798/17798443.png',
-            status: 'Approved',
-            statusLabel: 'Founding Member',
-            address: 'Pedda Harivanam',
-            source: 'legacy'
+          // Combine all
+          const combined = [...legacyMembers, ...firestoreMembers, ...joinRequests];
+          
+          // Deduplicate by email/name
+          const seen = new Set<string>();
+          const unique = combined.filter(m => {
+            const key = (m.email || m.name).toLowerCase().trim();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
           });
-        }
-      });
 
-      // B. Add approved join requests (THE CORE FUNCTIONALITY REQUESTED BY USER)
-      approvedJoinRequests.forEach((req: any) => {
-        const name = String(req.FullName || req.fullName || req.Name || req.name || 'Member').trim();
-        const email = String(req.Email || req.email || '').trim();
-        const key = (email || name).toLowerCase();
+          setMembers(unique);
+          setLoading(false);
+        }, (err) => handleFirestoreError(err, OperationType.LIST, 'join_requests'));
+        unsubscribers.push(unsubJoin);
 
-        // Calculate age from DOB if age not provided
-        let derivedAge = String(req.Age || req.age || '');
-        const dobStr = req.DOB || req.dob;
-        if (!derivedAge && dobStr) {
-          try {
-            const birthYear = new Date(dobStr).getFullYear();
-            if (!isNaN(birthYear)) {
-              derivedAge = String(new Date().getFullYear() - birthYear);
-            }
-          } catch (e) {}
-        }
-
-        const memberRecord: DisplayMember = {
-          id: String(req["Id.No"] || req.IdNo || req.id || `PHDY-${idCounter++}`),
-          name: name,
-          role: 'PHDY Youth Member',
-          age: derivedAge || '25',
-          dob: dobStr || '',
-          qualification: req.Qualification || req.qualification || req.Education || req.education || 'Graduate',
-          motivation: req.Reason || req.reason || req.Motivation || req.motivation || 'Committed to village welfare, education, and community progress.',
-          image: req.PhotoUrl || req.photoUrl || req.Photo || req.ImageURL || req.image || 'https://cdn-icons-png.flaticon.com/128/17798/17798443.png',
-          status: 'Approved',
-          statusLabel: 'Approved Member',
-          address: req.Address || req.address || 'Pedda Harivanam',
-          email: email,
-          phone: req.Phone || req.phone || '',
-          source: 'join_request'
-        };
-
-        membersMap.set(key, memberRecord);
-      });
-
-      // C. Add pending join requests (NEW SECTION REQUESTED BY USER)
-      inProgressJoinRequests.forEach((req: any) => {
-        const name = String(req.FullName || req.fullName || req.Name || req.name || 'Applicant').trim();
-        const email = String(req.Email || req.email || '').trim();
-        const key = (email || name).toLowerCase();
-
-        // Calculate age from DOB if age not provided
-        let derivedAge = String(req.Age || req.age || '');
-        const dobStr = req.DOB || req.dob;
-        if (!derivedAge && dobStr) {
-          try {
-            const birthYear = new Date(dobStr).getFullYear();
-            if (!isNaN(birthYear)) {
-              derivedAge = String(new Date().getFullYear() - birthYear);
-            }
-          } catch (e) {}
-        }
-
-        const memberRecord: DisplayMember = {
-          id: String(req["Id.No"] || req.IdNo || req.id || `REQ-${idCounter++}`),
-          name: name,
-          role: 'Membership Applicant',
-          age: derivedAge || '',
-          dob: dobStr || '',
-          qualification: req.Qualification || req.qualification || req.Education || req.education || 'Pending Review',
-          motivation: req.Reason || req.reason || req.Motivation || req.motivation || 'Applying to join PHDY village development group.',
-          image: req.PhotoUrl || req.photoUrl || req.Photo || req.ImageURL || req.image || 'https://cdn-icons-png.flaticon.com/128/17798/17798443.png',
-          status: 'In Progress',
-          statusLabel: 'In Progress',
-          address: req.Address || req.address || 'Pedda Harivanam',
-          email: email,
-          phone: req.Phone || req.phone || '',
-          source: 'join_request_pending'
-        };
-
-        if (!membersMap.has(key)) {
-          membersMap.set(key, memberRecord);
-        }
-      });
-
-      // D. Also incorporate active users who have member roles
-      activeUsers.forEach((u: any) => {
-        const name = String(u.Name || u.name || '').trim();
-        const email = String(u.Email || u.email || '').trim();
-        const key = (email || name).toLowerCase();
-        
-        if (key && !membersMap.has(key)) {
-          const roleRaw = String(u.Role || u.role || 'phdy_member').toLowerCase();
-          const displayRole = roleRaw === 'admin' ? 'Administrator' :
-                              roleRaw === 'treasurer' ? 'Treasurer' : 'PHDY Member';
-
-          membersMap.set(key, {
-            id: `PHDY-${idCounter++}`,
-            name: name || email.split('@')[0],
-            role: displayRole,
-            age: '',
-            qualification: 'Active Contributor',
-            motivation: 'Volunteering for Pedda Harivanam village youth and community initiatives.',
-            image: u.ImageURL || u.image || 'https://cdn-icons-png.flaticon.com/128/17798/17798443.png',
-            status: 'Approved',
-            statusLabel: 'Approved User',
-            address: 'Pedda Harivanam',
-            email: email,
-            source: 'user'
-          });
-        }
-      });
-
-      // E. Fallback: if old spreadsheet members sheet was filled, overlay any details
-      spreadsheetDirectMembers.forEach((m: any) => {
-        const name = String(m.Name || m.name || '').trim();
-        const key = name.toLowerCase();
-        if (key && membersMap.has(key)) {
-          const existing = membersMap.get(key)!;
-          membersMap.set(key, {
-            ...existing,
-            age: m.Age || existing.age,
-            qualification: m.Qualification || existing.qualification,
-            motivation: m.Motivation || existing.motivation,
-            image: m.ImageURL || existing.image
-          });
-        }
-      });
-
-      // Sort: legacy members first by numeric ID, followed by approved join requests
-      const sortedList = Array.from(membersMap.values()).sort((a, b) => {
-        const idA = parseInt(a.id.replace(/\D/g, '')) || 9999;
-        const idB = parseInt(b.id.replace(/\D/g, '')) || 9999;
-        return idA - idB;
-      });
-
-      setMembers(sortedList);
-    } catch (err) {
-      console.error("Error loading members:", err);
-    } finally {
+      }, (err) => handleFirestoreError(err, OperationType.LIST, 'members'));
+      unsubscribers.push(unsubMembers);
+    } catch (e) {
       setLoading(false);
     }
-  };
 
-  useEffect(() => {
-    fetchAllMembers();
-
-    // Listen for events from join request approvals or submissions
-    const handleSync = () => {
-      fetchAllMembers();
-    };
-
-    window.addEventListener('phdy_members_updated', handleSync);
-    window.addEventListener('phdy_join_requests_updated', handleSync);
-
-    return () => {
-      window.removeEventListener('phdy_members_updated', handleSync);
-      window.removeEventListener('phdy_join_requests_updated', handleSync);
-    };
+    return () => unsubscribers.forEach(unsub => unsub());
   }, []);
 
   const filteredMembers = useMemo(() => {
