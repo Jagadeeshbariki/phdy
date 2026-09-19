@@ -35,14 +35,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const userDoc = await getDoc(doc(db, 'users', user.email));
           if (userDoc.exists()) {
             setRole(userDoc.data().role);
-          } else if (user.email === 'vyomanautjagadeesh@gmail.com') {
+          } else if (user.email?.toLowerCase() === 'vyomanautjagadeesh@gmail.com') {
             setRole('admin');
           } else {
             setRole('user');
           }
         } catch (e) {
           console.error("Error fetching user role:", e);
-          if (user.email === 'vyomanautjagadeesh@gmail.com') {
+          if (user.email?.toLowerCase() === 'vyomanautjagadeesh@gmail.com') {
             setRole('admin');
           } else {
             setRole('user');

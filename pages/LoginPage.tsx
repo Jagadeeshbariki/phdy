@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { ShieldCheck, LogIn } from 'lucide-react';
-import { signInWithGoogle } from '../src/lib/firebase';
+import { signInWithGoogleRedirect, handleRedirectResult } from '../src/lib/firebase';
 import { Page } from '../App';
 import { useFirebase } from '../src/context/FirebaseContext';
 
@@ -11,6 +11,15 @@ interface LoginPageProps {
 
 const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
   const { user, role, isAdmin, isTreasurer, loading } = useFirebase();
+  const [error, setError] = React.useState<string | null>(null);
+
+  // Check for redirect result on mount
+  React.useEffect(() => {
+    handleRedirectResult().catch((err) => {
+      console.error("Auth redirect error:", err);
+      setError("Sign in failed. Please ensure popups/redirects are allowed.");
+    });
+  }, []);
 
   // Redirect based on role once logged in
   React.useEffect(() => {
@@ -27,10 +36,10 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
 
   const handleSignIn = async () => {
     try {
-      await signInWithGoogle();
-      // App.tsx handles the redirect via useEffect on role change
+      await signInWithGoogleRedirect();
     } catch (error) {
       console.error("Sign in failed:", error);
+      setError("Failed to initiate sign in. Please try again.");
     }
   };
 
@@ -45,6 +54,12 @@ const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
         <p className="text-gray-500 text-sm mb-10 leading-relaxed">
           Sign in to access PHDY administrative tools, financial records, and internal member portals.
         </p>
+
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl text-red-600 text-xs font-bold">
+            {error}
+          </div>
+        )}
 
         <button 
           onClick={handleSignIn}

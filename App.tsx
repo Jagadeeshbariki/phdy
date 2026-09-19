@@ -45,7 +45,15 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const handlePopState = () => {
-      const path = window.location.hash.replace('#', '') as Page;
+      let path = window.location.hash.replace('#', '') as Page;
+      
+      // Fallback to pathname if hash is empty (for direct URLs /login etc)
+      if (!path) {
+        const urlPath = window.location.pathname.substring(1) as Page;
+        if (['home', 'members', 'ourworks', 'accounting', 'contact', 'admin', 'internal', 'login'].includes(urlPath)) {
+          path = urlPath;
+        }
+      }
 
       // Gate PHDY Internal: phdy_member, treasurer, or admin only
       if (path === 'internal') {
