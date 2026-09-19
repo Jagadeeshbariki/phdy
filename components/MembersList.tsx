@@ -13,7 +13,7 @@ export interface DisplayMember {
   qualification: string;
   motivation: string;
   image: string;
-  status: 'Approved' | 'In progress';
+  status: 'Approved' | 'In Progress';
   statusLabel: string;
   address?: string;
   email?: string;
@@ -256,7 +256,7 @@ const MembersList: React.FC = () => {
           qualification: req.Qualification || req.qualification || req.Education || req.education || 'Pending Review',
           motivation: req.Reason || req.reason || req.Motivation || req.motivation || 'Applying to join PHDY village development group.',
           image: req.PhotoUrl || req.photoUrl || req.Photo || req.ImageURL || req.image || 'https://cdn-icons-png.flaticon.com/128/17798/17798443.png',
-          status: 'In progress',
+          status: 'In Progress',
           statusLabel: 'In progress',
           address: req.Address || req.address || 'Pedda Harivanam',
           email: email,
@@ -358,7 +358,7 @@ const MembersList: React.FC = () => {
       if (activeFilter === 'all') return m.status === 'Approved';
       if (activeFilter === 'approved') return (m.source === 'join_request' || m.source === 'user') && m.status === 'Approved';
       if (activeFilter === 'founding') return m.source === 'legacy';
-      if (activeFilter === 'join_requests') return m.status === 'In progress';
+      if (activeFilter === 'join_requests') return m.status === 'In Progress';
       return true;
     });
   }, [members, searchTerm, activeFilter]);
@@ -376,7 +376,7 @@ const MembersList: React.FC = () => {
 
   const approvedCount = members.filter(m => m.status === 'Approved').length;
   const joinRequestApprovedCount = members.filter(m => (m.source === 'join_request' || m.source === 'user') && m.status === 'Approved').length;
-  const inProgressCount = members.filter(m => m.status === 'In progress').length;
+  const inProgressCount = members.filter(m => m.status === 'In Progress').length;
   const foundingCount = members.filter(m => m.source === 'legacy').length;
 
   return (

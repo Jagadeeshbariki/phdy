@@ -117,7 +117,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
   const [updatingUserEmail, setUpdatingUserEmail] = useState<string | null>(null);
   const [userRoleSuccess, setUserRoleSuccess] = useState<string>('');
   const [userSearchTerm, setUserSearchTerm] = useState<string>('');
-  const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'admin' | 'treasurer' | 'Phdy_member' | 'user'>('all');
+  const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'admin' | 'treasurer' | 'phdy_member' | 'user'>('all');
   
   // Add user modal states
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
@@ -410,9 +410,8 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
 
     try {
       const data = await robustFetchUtility({ type: 'users' }, 'get_users');
-
-      // Base users: Only the current logged-in admin as a fallback to keep the session alive
       const userMap = new Map<string, any>();
+      
       const currentAdminKey = loggedInUser?.email?.toLowerCase().trim();
       if (currentAdminKey) {
         userMap.set(currentAdminKey, {
@@ -424,24 +423,22 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         });
       }
 
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         data.forEach(u => {
           if (u && (u.Email || u.email)) {
             const email = String(u.Email || u.email).toLowerCase().trim();
-            const existing = userMap.get(email);
             userMap.set(email, {
-              name: u.Name || u.name || u.FullName || u.fullName || existing?.name || email.split('@')[0],
+              name: u.Name || u.name || u.FullName || u.fullName || email.split('@')[0],
               email: email,
-              role: u.Role || u.role || existing?.role || 'user',
-              joinedDate: u.JoinedDate || u.date || u.joinedDate || existing?.joinedDate || '2025-01-01',
-              status: u.Status || u.status || existing?.status || 'Active'
+              role: u.Role || u.role || 'user',
+              joinedDate: u.JoinedDate || u.joinedDate || u.date || '2025-01-01',
+              status: u.Status || u.status || 'Active'
             });
           }
         });
       }
 
-      const mergedList: any[] = Array.from(userMap.values());
-      setSpreadsheetUsers(mergedList);
+      setSpreadsheetUsers(Array.from(userMap.values()));
     } catch (e) {
       console.warn("Failed to fetch users:", e);
     } finally {
@@ -966,13 +963,18 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
           body: JSON.stringify({
             action: 'approve_join_request',
             email: finalEmailLower,
+            Email: finalEmailLower,
             fullName: req.fullName,
+            FullName: req.fullName,
+            "Full Name": req.fullName,
+            Name: req.fullName,
             phone: req.phone || '',
             dob: req.dob || '',
             address: req.address || '',
             reason: req.reason || '',
             photoUrl: req.photoUrl || '',
-            status: 'Approved'
+            status: 'Approved',
+            Status: 'Approved'
           })
         });
       } catch (e) {}
@@ -985,7 +987,11 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
           body: JSON.stringify({
             action: 'update_join_request_status',
             email: finalEmailLower,
+            Email: finalEmailLower,
             fullName: req.fullName,
+            FullName: req.fullName,
+            "Full Name": req.fullName,
+            Name: req.fullName,
             status: 'Approved',
             Status: 'Approved',
             'Request Status': 'Approved',
@@ -1792,16 +1798,16 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
               const s = String(statusStr || '').trim().toLowerCase();
               if (s === 'approved') return 'Approved';
               if (s === 'rejected') return 'Rejected';
-              return 'In progress';
+              return 'In Progress';
             };
 
-            const inProgressCount = spreadsheetJoinRequests.filter(r => getNormalizedStatus(r.status) === 'In progress').length;
+            const inProgressCount = spreadsheetJoinRequests.filter(r => getNormalizedStatus(r.status) === 'In Progress').length;
             const approvedCount = spreadsheetJoinRequests.filter(r => getNormalizedStatus(r.status) === 'Approved').length;
             const rejectedCount = spreadsheetJoinRequests.filter(r => getNormalizedStatus(r.status) === 'Rejected').length;
 
             const visibleRequests = spreadsheetJoinRequests.filter(req => {
               const st = getNormalizedStatus(req.status);
-              return st === 'In progress';
+              return st === 'In Progress';
             });
 
             return (
@@ -1942,7 +1948,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                                     Rejected
                                   </span>
                                 )}
-                                {currentStatus === 'In progress' && (
+                                {currentStatus === 'In Progress' && (
                                   <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-[11px] font-black uppercase tracking-wider">
                                     <Clock className="w-3.5 h-3.5" />
                                     In progress
@@ -1952,7 +1958,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
 
                               <td className="py-4 text-right align-top">
                                 <div className="flex flex-col sm:flex-row items-end sm:items-center justify-end gap-2">
-                                  {currentStatus === 'In progress' && (
+                                  {currentStatus === 'In Progress' && (
                                     <>
                                       <button
                                         disabled={isProcessing}
