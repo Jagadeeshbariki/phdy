@@ -14,7 +14,7 @@ export type Page = 'home' | 'members' | 'ourworks' | 'accounting' | 'contact' | 
 
 export interface LoggedInUser {
   email: string;
-  role: 'admin' | 'treasurer' | 'phdy_member' | 'user' | string;
+  role: 'admin' | 'treasurer' | 'Phdy_member' | 'user' | string;
 }
 
 const hasInternalAccess = (user: LoggedInUser | null) => {

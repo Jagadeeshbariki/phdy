@@ -49,7 +49,7 @@ type AdminTab = 'members' | 'accounting' | 'works' | 'joinRequests' | 'users';
 export interface SystemUserRecord {
   name: string;
   email: string;
-  role: 'admin' | 'treasurer' | 'phdy_member' | 'user' | string;
+  role: 'admin' | 'treasurer' | 'Phdy_member' | 'user' | string;
   joinedDate?: string;
   status?: string;
 }
@@ -117,14 +117,14 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
   const [updatingUserEmail, setUpdatingUserEmail] = useState<string | null>(null);
   const [userRoleSuccess, setUserRoleSuccess] = useState<string>('');
   const [userSearchTerm, setUserSearchTerm] = useState<string>('');
-  const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'admin' | 'treasurer' | 'phdy_member' | 'user'>('all');
+  const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'admin' | 'treasurer' | 'Phdy_member' | 'user'>('all');
   
   // Add user modal states
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [newUserData, setNewUserData] = useState<{ name: string; email: string; role: string }>({
     name: '',
     email: '',
-    role: 'phdy_member'
+    role: 'Phdy_member'
   });
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -699,7 +699,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
           onLoginSuccess({ email: data.user.email, role: data.user.role });
           if (userRole === 'admin') {
             // Stay in admin section
-          } else if (userRole === 'phdy_member' || userRole === 'treasurer' || userRole === 'tressurer') {
+          } else if (userRole === 'phdy_member' || userRole === 'phdy_member' || userRole === 'treasurer' || userRole === 'tressurer') {
             if (onNavigate) onNavigate('internal');
           } else {
             if (onNavigate) onNavigate('home');
@@ -941,7 +941,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       const newUserRecord: SystemUserRecord = {
         name: req.fullName || finalEmailLower.split('@')[0],
         email: finalEmailLower,
-        role: 'phdy_member',
+        role: 'Phdy_member',
         joinedDate: new Date().toISOString().split('T')[0],
         status: 'Active'
       };
@@ -1007,12 +1007,14 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
             FullName: req.fullName,
             email: finalEmailLower,
             Email: finalEmailLower,
-            role: 'phdy_member',
-            Role: 'phdy_member',
+            username: finalEmailLower,
+            role: 'Phdy_member',
+            Role: 'Phdy_member',
             status: 'Active',
             Status: 'Active',
             'Account Status': 'Active',
-            password: 'TemporaryPassword123!'
+            password: 'TemporaryPassword123!',
+            ImageURL: req.photoUrl || ''
           })
         });
       } catch (e) {}
@@ -1025,10 +1027,11 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
           body: JSON.stringify({
             action: 'update_user_role',
             email: finalEmailLower,
-            role: 'phdy_member',
-            newRole: 'phdy_member',
+            role: 'Phdy_member',
+            newRole: 'Phdy_member',
             status: 'Active',
-            Status: 'Active'
+            Status: 'Active',
+            ImageURL: req.photoUrl || ''
           })
         });
       } catch (e) {}
@@ -1046,7 +1049,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
             fullName: req.fullName,
             Phone: req.phone || '',
             Address: req.address || '',
-            Role: 'phdy_member',
+            Role: 'Phdy_member',
             ImageURL: req.photoUrl || '',
             Status: 'Approved',
             status: 'Approved',
@@ -1789,19 +1792,16 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
               const s = String(statusStr || '').trim().toLowerCase();
               if (s === 'approved') return 'Approved';
               if (s === 'rejected') return 'Rejected';
-              return 'In Progress';
+              return 'In progress';
             };
 
-            const inProgressCount = spreadsheetJoinRequests.filter(r => getNormalizedStatus(r.status) === 'In Progress').length;
-            const rejectedCount = spreadsheetJoinRequests.filter(r => getNormalizedStatus(r.status) === 'Rejected').length;
+            const inProgressCount = spreadsheetJoinRequests.filter(r => getNormalizedStatus(r.status) === 'In progress').length;
             const approvedCount = spreadsheetJoinRequests.filter(r => getNormalizedStatus(r.status) === 'Approved').length;
+            const rejectedCount = spreadsheetJoinRequests.filter(r => getNormalizedStatus(r.status) === 'Rejected').length;
 
             const visibleRequests = spreadsheetJoinRequests.filter(req => {
               const st = getNormalizedStatus(req.status);
-              if (joinRequestFilter === 'in_progress') return st === 'In Progress';
-              if (joinRequestFilter === 'approved') return st === 'Approved';
-              if (joinRequestFilter === 'rejected') return st === 'Rejected';
-              return true;
+              return st === 'In progress';
             });
 
             return (
@@ -1827,54 +1827,14 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                     </div>
 
                     <div className="flex flex-wrap items-center gap-3">
-                      {/* Filter Toggle */}
+                      {/* Filter Toggle - Simplified to only show In Progress */}
                       <div className="flex flex-wrap items-center bg-gray-100 p-1.5 rounded-2xl gap-1">
                         <button
                           type="button"
-                          onClick={() => setJoinRequestFilter('in_progress')}
-                          className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 ${
-                            joinRequestFilter === 'in_progress'
-                              ? 'bg-amber-500 text-white shadow-sm'
-                              : 'text-gray-600 hover:text-gray-900'
-                          }`}
+                          className="px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 bg-amber-500 text-white shadow-sm"
                         >
                           <Clock className="w-3.5 h-3.5" />
                           <span>In Progress ({inProgressCount})</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setJoinRequestFilter('approved')}
-                          className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 ${
-                            joinRequestFilter === 'approved'
-                              ? 'bg-emerald-600 text-white shadow-sm'
-                              : 'text-gray-600 hover:text-gray-900'
-                          }`}
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Approved ({approvedCount})</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setJoinRequestFilter('rejected')}
-                          className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 ${
-                            joinRequestFilter === 'rejected'
-                              ? 'bg-rose-600 text-white shadow-sm'
-                              : 'text-gray-600 hover:text-gray-900'
-                          }`}
-                        >
-                          <XCircle className="w-3.5 h-3.5" />
-                          <span>Rejected ({rejectedCount})</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setJoinRequestFilter('all')}
-                          className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
-                            joinRequestFilter === 'all'
-                              ? 'bg-gray-900 text-white shadow-sm'
-                              : 'text-gray-600 hover:text-gray-900'
-                          }`}
-                        >
-                          All ({spreadsheetJoinRequests.length})
                         </button>
                       </div>
 
@@ -1982,17 +1942,17 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                                     Rejected
                                   </span>
                                 )}
-                                {currentStatus === 'In Progress' && (
+                                {currentStatus === 'In progress' && (
                                   <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-[11px] font-black uppercase tracking-wider">
                                     <Clock className="w-3.5 h-3.5" />
-                                    In Progress
+                                    In progress
                                   </span>
                                 )}
                               </td>
 
                               <td className="py-4 text-right align-top">
                                 <div className="flex flex-col sm:flex-row items-end sm:items-center justify-end gap-2">
-                                  {currentStatus === 'In Progress' && (
+                                  {currentStatus === 'In progress' && (
                                     <>
                                       <button
                                         disabled={isProcessing}
@@ -2134,7 +2094,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                   icon: <Coins className="w-3.5 h-3.5 text-emerald-600" />
                 };
               }
-              if (r === 'phdy_member') {
+              if (r === 'Phdy_member') {
                 return {
                   label: 'PHDY Member',
                   badgeCls: 'bg-orange-50 text-orange-700 border border-orange-200',
@@ -2445,7 +2405,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                           >
                             <option value="admin">👑 Admin (Full Access)</option>
                             <option value="treasurer">💰 Treasurer (Funds & Internal Access)</option>
-                            <option value="phdy_member">🛡️ PHDY Member (Internal Portal)</option>
+                            <option value="Phdy_member">🛡️ PHDY Member (Internal Portal)</option>
                             <option value="user">👤 Standard User</option>
                           </select>
                         </div>

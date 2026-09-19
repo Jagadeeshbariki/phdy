@@ -83,10 +83,10 @@ const ContactSection: React.FC = () => {
         Reason: formData.reason.trim(),
         photoUrl: cloudinaryData.secure_url,
         PhotoUrl: cloudinaryData.secure_url,
-        status: 'In Progress',
-        Status: 'In Progress',
-        "Request Status": 'In Progress',
-        "RequestStatus": 'In Progress',
+        status: 'In progress',
+        Status: 'In progress',
+        "Request Status": 'In progress',
+        "RequestStatus": 'In progress',
         date: new Date().toISOString().split('T')[0],
         Date: new Date().toISOString().split('T')[0],
         timestamp: new Date().toISOString(),
@@ -102,7 +102,7 @@ const ContactSection: React.FC = () => {
           address: formData.address.trim(),
           reason: formData.reason.trim(),
           photoUrl: cloudinaryData.secure_url,
-          status: 'In Progress',
+          status: 'In progress',
           date: new Date().toISOString().split('T')[0]
         };
         const cached: any[] = JSON.parse(localStorage.getItem('phdy_join_requests_cache') || '[]');

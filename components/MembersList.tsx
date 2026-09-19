@@ -13,7 +13,7 @@ export interface DisplayMember {
   qualification: string;
   motivation: string;
   image: string;
-  status: 'Approved' | 'In Progress';
+  status: 'Approved' | 'In progress';
   statusLabel: string;
   address?: string;
   email?: string;
@@ -133,7 +133,7 @@ const MembersList: React.FC = () => {
         return st === 'approved' || st === 'accept' || st === 'accepted';
       });
 
-      // Filter for pending join requests (In Progress)
+      // Filter for pending join requests (In progress)
       const inProgressJoinRequests = Array.from(allJoinRequestsMap.values()).filter(r => {
         const st = String(r.Status || r.status || r['Request Status'] || r.RequestStatus || '').trim().toLowerCase();
         return st === '' || st === 'in progress' || st === 'pending';
@@ -256,8 +256,8 @@ const MembersList: React.FC = () => {
           qualification: req.Qualification || req.qualification || req.Education || req.education || 'Pending Review',
           motivation: req.Reason || req.reason || req.Motivation || req.motivation || 'Applying to join PHDY village development group.',
           image: req.PhotoUrl || req.photoUrl || req.Photo || req.ImageURL || req.image || 'https://cdn-icons-png.flaticon.com/128/17798/17798443.png',
-          status: 'In Progress',
-          statusLabel: 'In Progress',
+          status: 'In progress',
+          statusLabel: 'In progress',
           address: req.Address || req.address || 'Pedda Harivanam',
           email: email,
           phone: req.Phone || req.phone || '',
@@ -355,10 +355,10 @@ const MembersList: React.FC = () => {
 
       if (!matchesSearch) return false;
 
-      if (activeFilter === 'all') return true; // Show both Approved and In Progress in the "All" view if requested
+      if (activeFilter === 'all') return m.status === 'Approved';
       if (activeFilter === 'approved') return (m.source === 'join_request' || m.source === 'user') && m.status === 'Approved';
       if (activeFilter === 'founding') return m.source === 'legacy';
-      if (activeFilter === 'join_requests') return m.status === 'In Progress';
+      if (activeFilter === 'join_requests') return m.status === 'In progress';
       return true;
     });
   }, [members, searchTerm, activeFilter]);
@@ -376,7 +376,7 @@ const MembersList: React.FC = () => {
 
   const approvedCount = members.filter(m => m.status === 'Approved').length;
   const joinRequestApprovedCount = members.filter(m => (m.source === 'join_request' || m.source === 'user') && m.status === 'Approved').length;
-  const inProgressCount = members.filter(m => m.status === 'In Progress').length;
+  const inProgressCount = members.filter(m => m.status === 'In progress').length;
   const foundingCount = members.filter(m => m.source === 'legacy').length;
 
   return (
