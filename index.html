@@ -10,10 +10,11 @@
   <link rel="icon" type="image/png" href="https://res.cloudinary.com/dbohmpxko/image/upload/v1729417549/LogoWithoutBG_qzoqus.png">
   
   <!-- PWA Meta Tags -->
-  <link rel="manifest" href="manifest.json">
+  <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#ea580c">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="PHDY">
   <link rel="apple-touch-icon" href="https://res.cloudinary.com/dbohmpxko/image/upload/v1729417549/LogoWithoutBG_qzoqus.png">
   <meta name="description" content="Community-driven development for Pedda Harivanam village youth.">
@@ -58,8 +59,13 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/service-worker.js')
-          .then(reg => console.log('Service Worker registered:', reg.scope))
+        navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
+          .then(reg => {
+            console.log('Service Worker registered successfully with scope:', reg.scope);
+            if (reg.waiting) {
+              reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+            }
+          })
           .catch(err => console.log('Service Worker registration failed:', err));
       });
     }

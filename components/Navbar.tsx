@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { LoggedInUser, Page } from '../App';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface NavbarProps {
   currentPage: string;
@@ -95,6 +96,11 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, loggedInUser, 
             </button>
           )}
 
+          {/* PWA Install Button */}
+          <div className="ml-2">
+            <PWAInstallButton />
+          </div>
+
           {/* Authentication Entry Point */}
           {loggedInUser ? (
             <div className="flex items-center space-x-2 ml-4">
@@ -178,7 +184,8 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, loggedInUser, 
               </button>
             )}
 
-            <div className="pt-4 border-t border-gray-50 mt-4">
+            <div className="pt-4 border-t border-gray-50 mt-4 space-y-3">
+              <PWAInstallButton isMobileNav />
               {loggedInUser ? (
                 <div className="space-y-3">
                   <div className="px-6 py-2 text-xs font-semibold text-gray-500 flex items-center justify-between">

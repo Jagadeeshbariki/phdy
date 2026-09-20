@@ -7,6 +7,14 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Ensure Service-Worker-Allowed header is set for PWA root scope
+  app.use((req, res, next) => {
+    if (req.path === '/service-worker.js') {
+      res.setHeader('Service-Worker-Allowed', '/');
+    }
+    next();
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
