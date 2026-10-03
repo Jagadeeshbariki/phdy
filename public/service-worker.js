@@ -1,4 +1,4 @@
-const CACHE_NAME = 'phdy-pwa-v10';
+const CACHE_NAME = 'phdy-pwa-v12';
 
 const PRECACHE_ASSETS = [
   '/',
@@ -47,6 +47,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // CRITICAL: NEVER intercept /api/ requests or dynamic geojson/data requests in the service worker!
+  const url = event.request.url;
+  if (url.includes('/api/') || url.includes('.geojson') || url.includes('drive.google.com')) {
+    return;
+  }
+
   // Navigation requests: Opening the app or following a link
   if (event.request.mode === 'navigate') {
     event.respondWith(
@@ -76,7 +82,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static Assets & API calls
+  // Static Assets (CSS, JS, images)
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       const fetchPromise = fetch(event.request)

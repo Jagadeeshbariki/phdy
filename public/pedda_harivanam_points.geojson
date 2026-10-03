@@ -1,0 +1,60 @@
+{
+  "type": "FeatureCollection",
+  "name": "Pedda_harivanam_point",
+  "crs": {
+    "type": "name",
+    "properties": {
+      "name": "urn:ogc:def:crs:OGC:1.3:CRS84"
+    }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 1,
+        "Name": "Zilla Parisadh High School",
+        "type": "High School",
+        "category": "Education"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          77.10218805934603,
+          15.630581808142665
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 2,
+        "Name": "M.P.P Kannada School",
+        "type": "Primary School (Kannada)",
+        "category": "Education"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          77.10034438685858,
+          15.6325348009539
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 3,
+        "Name": "M.P.P Telugu School",
+        "type": "Primary School (Telugu)",
+        "category": "Education"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          77.10342190707631,
+          15.634604239468418
+        ]
+      }
+    }
+  ]
+}
