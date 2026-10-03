@@ -1,4 +1,4 @@
-const CACHE_NAME = 'phdy-pwa-v4';
+const CACHE_NAME = 'phdy-pwa-v10';
 
 const PRECACHE_ASSETS = [
   '/',
@@ -44,6 +44,11 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   // Only handle GET requests
   if (event.request.method !== 'GET') {
+    return;
+  }
+
+  // Bypass service worker for API calls to ensure they always hit the network
+  if (event.request.url.includes('/api/')) {
     return;
   }
 

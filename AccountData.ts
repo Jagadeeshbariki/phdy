@@ -399,5 +399,22 @@ export const ACCOUNT_DATA: YearData[] = [
         }
       }
     ]
+  },
+  {
+    "year": "2026-27",
+    "Months": [
+      { "month": "April", "details": { "Income": [], "Expenditure": [] } },
+      { "month": "May", "details": { "Income": [], "Expenditure": [] } },
+      { "month": "June", "details": { "Income": [], "Expenditure": [] } },
+      { "month": "July", "details": { "Income": [], "Expenditure": [] } },
+      { "month": "August", "details": { "Income": [], "Expenditure": [] } },
+      { "month": "September", "details": { "Income": [], "Expenditure": [] } },
+      { "month": "October", "details": { "Income": [], "Expenditure": [] } },
+      { "month": "November", "details": { "Income": [], "Expenditure": [] } },
+      { "month": "December", "details": { "Income": [], "Expenditure": [] } },
+      { "month": "January", "details": { "Income": [], "Expenditure": [] } },
+      { "month": "February", "details": { "Income": [], "Expenditure": [] } },
+      { "month": "March", "details": { "Income": [], "Expenditure": [] } }
+    ]
   }
 ];

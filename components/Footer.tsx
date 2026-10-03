@@ -17,6 +17,7 @@ const Footer: React.FC<FooterProps> = ({ onNavClick, loggedInUser }) => {
 
   const siteMap = [
     { id: 'home', label: 'Home' },
+    { id: 'villagemap', label: 'Village Map' },
     { id: 'members', label: 'Members' },
     { id: 'ourworks', label: 'Our Works' },
     { id: 'accounting', label: 'Accounting' },

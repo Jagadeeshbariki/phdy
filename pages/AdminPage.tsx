@@ -18,11 +18,19 @@ import {
   Lock,
   Mail,
   Calendar,
-  ShieldAlert
+  ShieldAlert,
+  Camera
 } from 'lucide-react';
 import { LoggedInUser } from '../App';
+import CameraModal from '../components/CameraModal';
 import { getCurrentFinancialYear, getFinancialYearsList } from '../types';
 import aboutConfigData from '../public/AboutConfig.json';
+import { 
+  fetchSpreadsheetAccountingRecords, 
+  addRecordToLocalCache, 
+  removeRecordFromLocalCache, 
+  ACCOUNTING_APPS_SCRIPT_SNIPPET 
+} from '../utils/accountingHelper';
 
 const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
 const CLOUDINARY_CLOUD_NAME = 'dbohmpxko';
@@ -59,7 +67,7 @@ export const loadInitialUsers = (currentLoggedInUser?: LoggedInUser | null): Sys
 
   // Only include the current logged-in user as a safety base to ensure the UI remains accessible
   if (currentLoggedInUser && currentLoggedInUser.email) {
-    const key = currentLoggedInUser.email.toLowerCase().trim();
+    const key = String(currentLoggedInUser.email || '').toLowerCase().trim();
     userMap.set(key, {
       name: key.split('@')[0],
       email: key,
@@ -118,6 +126,10 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
   const [userRoleSuccess, setUserRoleSuccess] = useState<string>('');
   const [userSearchTerm, setUserSearchTerm] = useState<string>('');
   const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'admin' | 'treasurer' | 'phdy_member' | 'user'>('all');
+  const [showAccountingSetupGuide, setShowAccountingSetupGuide] = useState(false);
+  const [copiedAccountingCode, setCopiedAccountingCode] = useState(false);
+  const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
+  const [updatingMemberEmail, setUpdatingMemberEmail] = useState<string | null>(null);
   
   // Add user modal states
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
@@ -238,7 +250,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       cachedApprovedReqs.forEach((r: any) => {
         const name = String(r.fullName || r.FullName || r.name || r.Name || 'Member').trim();
         const email = String(r.email || r.Email || '').trim();
-        const key = (email || name).toLowerCase();
+        const key = String(email || name || '').toLowerCase();
         if (key) {
           memberMap.set(key, {
             "Id.No": r["Id.No"] || r.IdNo || 'MEMBER',
@@ -261,7 +273,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       cachedUsers.forEach((u: any) => {
         const name = String(u.name || u.Name || '').trim();
         const email = String(u.email || u.Email || '').trim();
-        const key = (email || name).toLowerCase();
+        const key = String(email || name || '').toLowerCase();
         if (key && !memberMap.has(key)) {
           memberMap.set(key, {
             "Id.No": 'USER',
@@ -303,8 +315,8 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     if (!SPREADSHEET_API_URL || !loggedInUser) return;
     setIsRefreshing(true);
     try {
-      const data = await robustFetchUtility({ type: 'accounting' }, 'get_accounting');
-      setSpreadsheetAccounting(Array.isArray(data) ? data : []);
+      const { records } = await fetchSpreadsheetAccountingRecords(SPREADSHEET_API_URL);
+      setSpreadsheetAccounting(records);
     } catch (e) {
       console.warn("Failed to fetch accounting:", e);
     } finally {
@@ -455,7 +467,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     if (!newUserData.name.trim()) return alert("User name is required.");
     if (!newUserData.email.trim() || !newUserData.email.includes('@')) return alert("Valid email address is required.");
 
-    const emailLower = newUserData.email.trim().toLowerCase();
+    const emailLower = String(newUserData.email || '').trim().toLowerCase();
     const newUser = {
       name: newUserData.name.trim(),
       email: emailLower,
@@ -506,7 +518,9 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       alert("Permission denied: Only an Administrator can remove users.");
       return;
     }
-    if (email.toLowerCase() === loggedInUser.email.toLowerCase()) {
+    const userEmail = String(loggedInUser?.email || '').toLowerCase().trim();
+    const targetEmail = String(email || '').toLowerCase().trim();
+    if (targetEmail && userEmail && targetEmail === userEmail) {
       alert("You cannot delete your own logged-in administrator account.");
       return;
     }
@@ -514,7 +528,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
 
     try {
       // 1. Update state
-      setSpreadsheetUsers(prev => prev.filter(u => String(u.email).toLowerCase() !== email.toLowerCase()));
+      setSpreadsheetUsers(prev => prev.filter(u => String(u.email || '').toLowerCase().trim() !== targetEmail));
 
       // 2. Post delete to spreadsheet
       await fetch(SPREADSHEET_API_URL, {
@@ -539,7 +553,9 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       return;
     }
 
-    const targetUser = spreadsheetUsers.find(u => String(u.email).toLowerCase() === String(email).toLowerCase());
+    const userEmail = String(loggedInUser?.email || '').toLowerCase().trim();
+    const targetEmail = String(email || '').toLowerCase().trim();
+    const targetUser = spreadsheetUsers.find(u => String(u.email || '').toLowerCase().trim() === targetEmail);
     const currentRole = targetUser?.role || 'user';
     if (currentRole === targetRole) return;
 
@@ -551,7 +567,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     };
     const targetRoleLabel = roleNameMap[targetRole] || targetRole;
 
-    if (email.toLowerCase() === loggedInUser.email.toLowerCase() && targetRole !== 'admin') {
+    if (targetEmail && userEmail && targetEmail === userEmail && targetRole !== 'admin') {
       const confirmSelf = window.confirm(
         `⚠️ WARNING: You are changing your OWN role to "${targetRoleLabel}".\n\nDemoting your own account will immediately remove your Administrator access to this Admin Panel.\n\nAre you completely sure you want to proceed?`
       );
@@ -596,15 +612,15 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
 
       // Immediately update local state
       setSpreadsheetUsers(prev => {
-        const exists = prev.some(u => String(u.email).toLowerCase() === String(email).toLowerCase());
+        const exists = prev.some(u => String(u.email || '').toLowerCase().trim() === targetEmail);
         if (exists) {
-          return prev.map(u => String(u.email).toLowerCase() === String(email).toLowerCase() ? { ...u, role: targetRole } : u);
+          return prev.map(u => String(u.email || '').toLowerCase().trim() === targetEmail ? { ...u, role: targetRole } : u);
         }
         return [...prev, { name: email.split('@')[0], email, role: targetRole }];
       });
 
       // Update current session if the admin edited their own account
-      if (email.toLowerCase() === loggedInUser.email.toLowerCase()) {
+      if (loggedInUser && targetEmail && userEmail && targetEmail === userEmail) {
         const updatedSelf = { ...loggedInUser, role: targetRole };
         sessionStorage.setItem('phdy_admin_session', JSON.stringify(updatedSelf));
         onLoginSuccess(updatedSelf);
@@ -626,7 +642,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
 
   useEffect(() => {
     if (loggedInUser) {
-      const roleLower = String(loggedInUser.role || '').toLowerCase();
+      const roleLower = String(loggedInUser?.role || '').toLowerCase();
       const isAdmin = roleLower === 'admin';
 
       if (isAdmin) {
@@ -703,9 +719,10 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
           }
         } else if (authMode === 'register') {
           // Immediately record new registered user into system user directory
+          const regEmail = String(loginData.email || '').trim().toLowerCase();
           const newRegUser = {
-            name: (loginData.name || '').trim() || loginData.email.split('@')[0],
-            email: loginData.email.trim().toLowerCase(),
+            name: (loginData.name || '').trim() || regEmail.split('@')[0],
+            email: regEmail,
             role: 'user',
             joinedDate: new Date().toISOString().split('T')[0],
             status: 'Pending Approval'
@@ -766,7 +783,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
 
   const handleMemberSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedFile) return alert("Photo is required.");
+    if (!selectedFile) return alert("Photo is required. You can upload or capture one using the camera.");
     setStatus('uploading');
     try {
       const cloudinaryData = await uploadToCloudinary(selectedFile, 'image');
@@ -802,7 +819,19 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     try {
       await fetch(SPREADSHEET_API_URL, {
         method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'add_accounting', ...finalPayload }),
+        body: JSON.stringify({ 
+          action: 'add_accounting', 
+          sheet: finalPayload.FinancialYear,
+          ...finalPayload 
+        }),
+      });
+      // Synchronize immediately to local storage so it renders in accounting table & AccountingPage
+      addRecordToLocalCache({
+        FinancialYear: finalPayload.FinancialYear,
+        Month: finalPayload.Month,
+        Type: finalPayload.Type as any,
+        Description: finalPayload.Description,
+        BillLink: finalPayload.BillLink
       });
       setStatus('success');
       alert("Submitted successfully!");
@@ -866,6 +895,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: 'delete_accounting', description: description }),
       });
+      removeRecordFromLocalCache(description);
       alert("Deleted successfully!");
       setTimeout(() => { 
         fetchSpreadsheetAccounting(); 
@@ -907,7 +937,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       finalEmail = window.prompt(`Missing email for ${req.fullName}. Please enter their email address to proceed:`);
       if (!finalEmail) return; // User cancelled
     }
-    const finalEmailLower = finalEmail.toLowerCase().trim();
+    const finalEmailLower = String(finalEmail || '').toLowerCase().trim();
     if (!window.confirm(`Are you sure you want to APPROVE ${req.fullName}? Their request status will be marked "Approved" (removed from active Join Requests) and their details will be added to the "Users" list.`)) return;
 
     setProcessingRequest(req.fullName);
@@ -1081,7 +1111,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       finalEmail = window.prompt(`Missing email for ${req.fullName}. Please enter their email address to proceed:`);
       if (!finalEmail) return;
     }
-    const finalEmailLower = finalEmail.toLowerCase().trim();
+    const finalEmailLower = String(finalEmail || '').toLowerCase().trim();
     if (!window.confirm(`Are you sure you want to REJECT the join request from ${req.fullName}? Status will be updated to "Rejected".`)) return;
 
     setProcessingRequest(req.fullName);
@@ -1345,7 +1375,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     );
   }
 
-  const roleLower = String(loggedInUser.role || '').toLowerCase();
+  const roleLower = String(loggedInUser?.role || '').toLowerCase();
   const isAdmin = roleLower === 'admin';
 
   if (!isAdmin) {
@@ -1392,8 +1422,46 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     );
   }
 
+  const handleCameraCapture = async (blob: Blob) => {
+    if (updatingMemberEmail) {
+      try {
+        setStatus('uploading');
+        const file = new File([blob], `member_photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
+        const cloudinaryData = await uploadToCloudinary(file, 'image');
+        
+        await fetch(SPREADSHEET_API_URL, {
+          method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ 
+            action: 'update_member_photo', 
+            email: updatingMemberEmail, 
+            ImageURL: cloudinaryData.secure_url 
+          }),
+        });
+        
+        alert("Photo updated successfully!");
+        fetchSpreadsheetMembers();
+      } catch (err) {
+        alert("Failed to update photo");
+      } finally {
+        setStatus('idle');
+        setUpdatingMemberEmail(null);
+        setIsCameraModalOpen(false);
+      }
+      return;
+    }
+
+    const file = new File([blob], `member_photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
+    setSelectedFile(file);
+    setPreviewUrl(URL.createObjectURL(blob));
+  };
+
   return (
     <div className="animate-fadeIn py-16 px-4 bg-gray-50 min-h-screen">
+      <CameraModal 
+        isOpen={isCameraModalOpen} 
+        onClose={() => setIsCameraModalOpen(false)} 
+        onCapture={handleCameraCapture} 
+      />
       <div className="max-w-5xl mx-auto space-y-10">
         <div className="flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-[32px] shadow-xl border border-orange-50 gap-4">
           <div className="flex items-center space-x-4">
@@ -1431,9 +1499,20 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                 <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tight mb-8">Add New Group Member</h2>
                 <form onSubmit={handleMemberSubmit} className="space-y-6">
                   <div className="flex flex-col items-center mb-8">
-                    <div onClick={() => fileInputRef.current?.click()} className="w-40 h-40 rounded-[2.5rem] border-4 border-dashed border-gray-200 flex items-center justify-center overflow-hidden bg-gray-50 cursor-pointer">
-                      {previewUrl ? <img src={previewUrl} className="w-full h-full object-cover" /> : <span className="text-xs text-gray-400 font-bold uppercase">Upload Photo</span>}
+                    <div className="relative group">
+                      <div onClick={() => fileInputRef.current?.click()} className="w-40 h-40 rounded-[2.5rem] border-4 border-dashed border-gray-200 flex items-center justify-center overflow-hidden bg-gray-50 cursor-pointer hover:border-orange-300 transition-colors">
+                        {previewUrl ? <img src={previewUrl} className="w-full h-full object-cover" /> : <span className="text-xs text-gray-400 font-bold uppercase">Upload Photo</span>}
+                      </div>
+                      <button 
+                        type="button"
+                        onClick={() => setIsCameraModalOpen(true)}
+                        className="absolute -bottom-2 -right-2 w-12 h-12 bg-orange-600 text-white rounded-2xl flex items-center justify-center shadow-lg hover:bg-orange-700 active:scale-95 transition-all z-10"
+                        title="Capture photo from camera"
+                      >
+                        <Camera className="w-5 h-5" />
+                      </button>
                     </div>
+                    <p className="mt-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Upload or Capture Member Photo</p>
                     <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={(e) => { const f = e.target.files?.[0]; if(f){ setSelectedFile(f); setPreviewUrl(URL.createObjectURL(f)); } }} />
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1519,12 +1598,25 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                             </span>
                           </td>
                           <td className="py-4 text-right">
-                            <button 
-                              onClick={()=>handleDelete(m["Id.No"])} 
-                              className="text-red-500 hover:text-red-700 font-bold text-xs uppercase hover:underline"
-                            >
-                              Remove
-                            </button>
+                            <div className="flex justify-end items-center gap-4">
+                              <button 
+                                onClick={() => {
+                                  setUpdatingMemberEmail(m.Email || m.email || m.Name);
+                                  setIsCameraModalOpen(true);
+                                }}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border border-blue-100"
+                                title="Update Photo"
+                              >
+                                <Camera className="w-3.5 h-3.5" />
+                                <span>Photo</span>
+                              </button>
+                              <button 
+                                onClick={()=>handleDelete(m["Id.No"])} 
+                                className="text-red-500 hover:text-red-700 font-bold text-xs uppercase hover:underline"
+                              >
+                                Remove
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1790,6 +1882,56 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                   </table>
                 </div>
               </div>
+
+              {/* Google Spreadsheet Accounting Integration Guide */}
+              <div className="bg-slate-900 text-white rounded-[40px] p-8 md:p-12 shadow-2xl border border-slate-800">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                  <div>
+                    <h3 className="text-xl font-black uppercase tracking-wider text-orange-400">Google Spreadsheet Integration for Accounting (2026-27)</h3>
+                    <p className="text-sm text-gray-400 mt-1">Deploy this code to your Google Apps Script project to sync 2026-27 accounting data from your Google Sheet.</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(ACCOUNTING_APPS_SCRIPT_SNIPPET);
+                        setCopiedAccountingCode(true);
+                        setTimeout(() => setCopiedAccountingCode(false), 3000);
+                      }}
+                      className="px-4 py-2.5 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg flex items-center gap-2 whitespace-nowrap"
+                    >
+                      {copiedAccountingCode ? '✓ Copied to Clipboard!' : 'Copy Accounting.gs Code'}
+                    </button>
+                    <button
+                      onClick={() => setShowAccountingSetupGuide(!showAccountingSetupGuide)}
+                      className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-gray-300 rounded-xl text-xs font-bold transition-all border border-slate-700 whitespace-nowrap"
+                    >
+                      {showAccountingSetupGuide ? 'Hide Instructions' : 'View Instructions'}
+                    </button>
+                  </div>
+                </div>
+
+                {showAccountingSetupGuide && (
+                  <div className="space-y-4 animate-fadeIn">
+                    <div className="p-4 bg-slate-950 rounded-2xl font-mono text-[11px] text-gray-300 max-h-72 overflow-y-auto border border-slate-800">
+                      <pre>{ACCOUNTING_APPS_SCRIPT_SNIPPET}</pre>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-slate-800 text-xs text-gray-300">
+                      <div className="p-4 bg-slate-800/50 rounded-2xl border border-slate-700/50">
+                        <strong className="block text-orange-400 font-black mb-1">Step 1: Sheet Tab Name</strong>
+                        Name your spreadsheet tab <code className="text-white bg-slate-900 px-1 py-0.5 rounded">Accounting</code> or <code className="text-white bg-slate-900 px-1 py-0.5 rounded">2026-27</code>.
+                      </div>
+                      <div className="p-4 bg-slate-800/50 rounded-2xl border border-slate-700/50">
+                        <strong className="block text-orange-400 font-black mb-1">Step 2: Column Headers (Row 1)</strong>
+                        Ensure columns: <code className="text-white bg-slate-900 px-1 py-0.5 rounded">FinancialYear, Month, Type, Description, BillLink</code>.
+                      </div>
+                      <div className="p-4 bg-slate-800/50 rounded-2xl border border-slate-700/50">
+                        <strong className="block text-orange-400 font-black mb-1">Step 3: Deploy as Web App</strong>
+                        In Apps Script, click <strong className="text-white">Deploy &gt; Manage deployments</strong>, edit, select <strong className="text-white">New version</strong>, and set <strong className="text-white">Who has access: Anyone</strong>.
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -2054,26 +2196,28 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
               </div>
             );
           })()}
-          {activeTab === 'users' && loggedInUser.role === 'admin' && (() => {
+          {activeTab === 'users' && loggedInUser?.role === 'admin' && (() => {
             const roleCount = {
               total: spreadsheetUsers.length,
-              admin: spreadsheetUsers.filter(u => String(u.role).toLowerCase() === 'admin').length,
+              admin: spreadsheetUsers.filter(u => String(u.role || '').toLowerCase() === 'admin').length,
               treasurer: spreadsheetUsers.filter(u => {
-                const r = String(u.role).toLowerCase();
+                const r = String(u.role || '').toLowerCase();
                 return r === 'treasurer' || r === 'tressurer';
               }).length,
-              member: spreadsheetUsers.filter(u => String(u.role).toLowerCase() === 'phdy_member').length,
+              member: spreadsheetUsers.filter(u => String(u.role || '').toLowerCase() === 'phdy_member').length,
               user: spreadsheetUsers.filter(u => {
-                const r = String(u.role).toLowerCase();
+                const r = String(u.role || '').toLowerCase();
                 return r !== 'admin' && r !== 'treasurer' && r !== 'tressurer' && r !== 'phdy_member';
               }).length
             };
 
+            const term = String(userSearchTerm || '').trim().toLowerCase();
             const filteredUsers = spreadsheetUsers.filter(u => {
               const r = String(u.role || '').toLowerCase();
               const matchesSearch = 
-                String(u.name || '').toLowerCase().includes(userSearchTerm.toLowerCase()) ||
-                String(u.email || '').toLowerCase().includes(userSearchTerm.toLowerCase());
+                !term ||
+                String(u.name || '').toLowerCase().includes(term) ||
+                String(u.email || '').toLowerCase().includes(term);
               
               if (!matchesSearch) return false;
               if (userRoleFilter === 'all') return true;
@@ -2267,8 +2411,8 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                         {filteredUsers.map((u, idx) => {
                           const roleInfo = getRoleBadgeConfig(u.role);
                           const isUpdating = updatingUserEmail === u.email;
-                          const isCurrentUser = loggedInUser && String(loggedInUser.email).toLowerCase() === String(u.email).toLowerCase();
-                          const currentNormRole = (String(u.role).toLowerCase() === 'tressurer') ? 'treasurer' : (u.role || 'user');
+                          const isCurrentUser = Boolean(loggedInUser?.email && String(loggedInUser.email).toLowerCase() === String(u.email || '').toLowerCase());
+                          const currentNormRole = (String(u.role || '').toLowerCase() === 'tressurer') ? 'treasurer' : (u.role || 'user');
 
                           return (
                             <tr key={idx} className="hover:bg-gray-50/50 transition-colors">

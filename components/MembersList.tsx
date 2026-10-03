@@ -172,7 +172,7 @@ const MembersList: React.FC = () => {
       // A. Add founding/legacy members first
       legacyMembers.forEach((m: any) => {
         const name = String(m.Name || m.name || '').trim();
-        const key = name.toLowerCase();
+        const key = String(name || '').toLowerCase();
         if (key) {
           const idStr = String(m["Id.No"] || m["id"] || idCounter++);
           membersMap.set(key, {
@@ -195,7 +195,7 @@ const MembersList: React.FC = () => {
       approvedJoinRequests.forEach((req: any) => {
         const name = String(req.FullName || req.fullName || req.Name || req.name || 'Member').trim();
         const email = String(req.Email || req.email || '').trim();
-        const key = (email || name).toLowerCase();
+        const key = String(email || name || '').toLowerCase();
 
         // Calculate age from DOB if age not provided
         let derivedAge = String(req.Age || req.age || '');
@@ -233,7 +233,7 @@ const MembersList: React.FC = () => {
       inProgressJoinRequests.forEach((req: any) => {
         const name = String(req.FullName || req.fullName || req.Name || req.name || 'Applicant').trim();
         const email = String(req.Email || req.email || '').trim();
-        const key = (email || name).toLowerCase();
+        const key = String(email || name || '').toLowerCase();
 
         // Calculate age from DOB if age not provided
         let derivedAge = String(req.Age || req.age || '');
@@ -273,7 +273,7 @@ const MembersList: React.FC = () => {
       activeUsers.forEach((u: any) => {
         const name = String(u.Name || u.name || '').trim();
         const email = String(u.Email || u.email || '').trim();
-        const key = (email || name).toLowerCase();
+        const key = String(email || name || '').toLowerCase();
         
         if (key && !membersMap.has(key)) {
           const roleRaw = String(u.Role || u.role || 'phdy_member').toLowerCase();
@@ -300,7 +300,7 @@ const MembersList: React.FC = () => {
       // E. Fallback: if old spreadsheet members sheet was filled, overlay any details
       spreadsheetDirectMembers.forEach((m: any) => {
         const name = String(m.Name || m.name || '').trim();
-        const key = name.toLowerCase();
+        const key = String(name || '').toLowerCase();
         if (key && membersMap.has(key)) {
           const existing = membersMap.get(key)!;
           membersMap.set(key, {
@@ -346,12 +346,19 @@ const MembersList: React.FC = () => {
   }, []);
 
   const filteredMembers = useMemo(() => {
+    const search = String(searchTerm || '').toLowerCase().trim();
     return members.filter(m => {
+      const name = String(m?.name || '').toLowerCase();
+      const qualification = String(m?.qualification || '').toLowerCase();
+      const address = String(m?.address || '').toLowerCase();
+      const role = String(m?.role || '').toLowerCase();
+
       const matchesSearch = 
-        m.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        m.qualification.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (m.address && m.address.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        m.role.toLowerCase().includes(searchTerm.toLowerCase());
+        !search ||
+        name.includes(search) ||
+        qualification.includes(search) ||
+        address.includes(search) ||
+        role.includes(search);
 
       if (!matchesSearch) return false;
 

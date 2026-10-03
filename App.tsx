@@ -8,9 +8,10 @@ import OurWorksPage from './pages/OurWorksPage';
 import AccountingPage from './pages/AccountingPage';
 import AdminPage from './pages/AdminPage';
 import PHDYInternalPage from './pages/PHDYInternalPage';
+import VillageMapPage from './pages/VillageMapPage';
 import Footer from './components/Footer';
 
-export type Page = 'home' | 'members' | 'ourworks' | 'accounting' | 'contact' | 'admin' | 'internal';
+export type Page = 'home' | 'members' | 'ourworks' | 'accounting' | 'contact' | 'admin' | 'internal' | 'villagemap';
 
 export interface LoggedInUser {
   email: string;
@@ -63,8 +64,8 @@ const App: React.FC = () => {
         return;
       }
 
-      if (['home', 'members', 'ourworks', 'accounting', 'contact', 'admin', 'internal'].includes(path)) {
-        setCurrentPage(path);
+      if (['home', 'members', 'ourworks', 'accounting', 'contact', 'admin', 'internal', 'villagemap'].includes(path)) {
+        setCurrentPage(path as Page);
       } else {
         setCurrentPage('home');
       }
@@ -134,6 +135,8 @@ const App: React.FC = () => {
         return <PHDYInternalPage onNavigate={navigateTo} loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onLogout={onLogout} />;
       case 'contact':
         return <ContactPage />;
+      case 'villagemap':
+        return <VillageMapPage />;
       case 'admin':
         return <AdminPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onLogout={onLogout} onNavigate={navigateTo} />;
       default:

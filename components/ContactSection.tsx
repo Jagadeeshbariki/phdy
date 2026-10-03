@@ -108,8 +108,8 @@ const ContactSection: React.FC = () => {
           date: new Date().toISOString().split('T')[0]
         };
         const cached: any[] = JSON.parse(localStorage.getItem('phdy_join_requests_cache') || '[]');
-        const targetEmail = localReq.email.toLowerCase();
-        const targetName = localReq.fullName.toLowerCase();
+        const targetEmail = String(localReq.email || '').toLowerCase().trim();
+        const targetName = String(localReq.fullName || '').toLowerCase().trim();
         const filtered = cached.filter((c: any) => {
           const cEmail = String(c.email || '').toLowerCase().trim();
           const cName = String(c.fullName || c.name || '').toLowerCase().trim();

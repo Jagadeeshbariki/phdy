@@ -1,7 +1,12 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { ACCOUNT_DATA, YearData, Transaction } from '../AccountData';
 import { getFinancialYearsList, getCurrentFinancialYear } from '../types';
+import { 
+  fetchSpreadsheetAccountingRecords, 
+  CleanAccountingRecord, 
+  ACCOUNTING_APPS_SCRIPT_SNIPPET 
+} from '../utils/accountingHelper';
 
 const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
 
@@ -49,57 +54,40 @@ const AccordionItem: React.FC<{
 };
 
 const AccountingPage: React.FC = () => {
-  const [dynamicRecords, setDynamicRecords] = useState<any[]>([]);
+  const [dynamicRecords, setDynamicRecords] = useState<CleanAccountingRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isLiveConnected, setIsLiveConnected] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showSetupGuide, setShowSetupGuide] = useState(false);
+  const [copiedSnippet, setCopiedSnippet] = useState(false);
+
+  const loadAccountingData = useCallback(async () => {
+    try {
+      const { records, isLiveConnected: connected } = await fetchSpreadsheetAccountingRecords(SPREADSHEET_API_URL);
+      setDynamicRecords(records);
+      setIsLiveConnected(connected);
+    } catch (err) {
+      console.warn("Failed to load dynamic accounting:", err);
+    } finally {
+      setLoading(false);
+      setIsRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const fetchDynamicAccounting = async () => {
-      const timeoutMs = 8000;
-      try {
-        const robustFetch = async () => {
-          // 1. Try GET
-          try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), timeoutMs);
-            const res = await fetch(`${SPREADSHEET_API_URL}?type=accounting&_t=${Date.now()}`, { 
-              signal: controller.signal,
-              cache: 'no-store'
-            });
-            clearTimeout(timer);
-            const text = await res.text();
-            if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
-              const parsed = JSON.parse(text);
-              const data = Array.isArray(parsed) ? parsed : (parsed.data || []);
-              if (data.length > 0) return data;
-            }
-          } catch (e) {}
+    loadAccountingData();
+  }, [loadAccountingData]);
 
-          // 2. Try POST fallback
-          try {
-            const res = await fetch(SPREADSHEET_API_URL, {
-              method: 'POST',
-              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-              body: JSON.stringify({ action: 'get_accounting', type: 'accounting' })
-            });
-            const text = await res.text();
-            if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
-              const parsed = JSON.parse(text);
-              return Array.isArray(parsed) ? parsed : (parsed.data || []);
-            }
-          } catch (e) {}
-          return [];
-        };
+  const handleManualSync = async () => {
+    setIsRefreshing(true);
+    await loadAccountingData();
+  };
 
-        const data = await robustFetch();
-        setDynamicRecords(data);
-      } catch (err) {
-        console.warn("Failed to load dynamic accounting:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchDynamicAccounting();
-  }, []);
+  const handleCopySnippet = () => {
+    navigator.clipboard.writeText(ACCOUNTING_APPS_SCRIPT_SNIPPET);
+    setCopiedSnippet(true);
+    setTimeout(() => setCopiedSnippet(false), 3000);
+  };
 
   // Calculate current month and financial year for "Recent" filtering
   const currentStatus = useMemo(() => {
@@ -115,24 +103,43 @@ const AccountingPage: React.FC = () => {
   const mergedData = useMemo(() => {
     const data: YearData[] = JSON.parse(JSON.stringify(ACCOUNT_DATA));
 
-    // Ensure all financial years from the dynamic list are present
+    // Ensure all financial years from the dynamic list are present (including 2026-27)
     const allYears = getFinancialYearsList();
     allYears.forEach(y => {
-      if (!data.some(yearObj => yearObj.year === y)) {
-        data.push({ year: y, Months: [] });
+      let yearObj = data.find(yearItem => yearItem.year === y);
+      if (!yearObj) {
+        yearObj = { year: y, Months: [] };
+        data.push(yearObj);
       }
+      
+      // Ensure all 12 financial months are initialized for each year
+      FINANCIAL_MONTH_ORDER.forEach(m => {
+        if (!yearObj!.Months.some(monthObj => String(monthObj.month || '').toLowerCase() === m.toLowerCase())) {
+          yearObj!.Months.push({
+            month: m,
+            details: { Income: [], Expenditure: [] }
+          });
+        }
+      });
     });
 
     dynamicRecords.forEach(record => {
-      const { FinancialYear, Month, Type, Description, BillLink } = record;
+      if (!record) return;
+      const FinancialYear = String(record.FinancialYear || '').trim();
+      const Month = String(record.Month || '').trim();
+      const Type = String(record.Type || '').trim();
+      const Description = String(record.Description || '').trim();
+      const BillLink = String(record.BillLink || '').trim();
       
+      if (!FinancialYear || !Month) return;
+
       let yearObj = data.find(y => y.year === FinancialYear);
       if (!yearObj) {
         yearObj = { year: FinancialYear, Months: [] };
         data.push(yearObj);
       }
 
-      let monthObj = yearObj.Months.find(m => m.month.toLowerCase() === Month.toLowerCase());
+      let monthObj = yearObj.Months.find(m => String(m.month || '').toLowerCase() === Month.toLowerCase());
       if (!monthObj) {
         monthObj = { 
           month: Month, 
@@ -151,31 +158,41 @@ const AccountingPage: React.FC = () => {
       } else if (Type === 'No Expenditure') {
         monthObj.details.noExpenditure = true;
       } else if (Type === 'Income') {
-        monthObj.details.Income.push(newTransaction);
+        // Avoid duplicate descriptions in the same month
+        if (!monthObj.details.Income.some(t => t.description === Description)) {
+          monthObj.details.Income.push(newTransaction);
+        }
       } else if (Type === 'Expenditure') {
-        monthObj.details.Expenditure.push(newTransaction);
+        if (!monthObj.details.Expenditure.some(t => t.description === Description)) {
+          monthObj.details.Expenditure.push(newTransaction);
+        }
       }
     });
 
     // Sort months within each year according to the financial year (April to March)
     data.forEach(yearObj => {
       yearObj.Months.sort((a, b) => {
-        const indexA = FINANCIAL_MONTH_ORDER.findIndex(m => m.toLowerCase() === a.month.toLowerCase());
-        const indexB = FINANCIAL_MONTH_ORDER.findIndex(m => m.toLowerCase() === b.month.toLowerCase());
-        return indexA - indexB;
+        const aMonth = String(a.month || '').toLowerCase();
+        const bMonth = String(b.month || '').toLowerCase();
+        const indexA = FINANCIAL_MONTH_ORDER.findIndex(m => m.toLowerCase() === aMonth);
+        const indexB = FINANCIAL_MONTH_ORDER.findIndex(m => m.toLowerCase() === bMonth);
+        return (indexA === -1 ? 999 : indexA) - (indexB === -1 ? 999 : indexB);
       });
     });
 
-    // Sort years descending
+    // Sort years descending so 2026-27 is at the top
     return data.sort((a, b) => b.year.localeCompare(a.year));
   }, [dynamicRecords]);
 
   // Filter for transactions strictly in the current calendar month
   const recentTransactions = useMemo(() => {
-    return dynamicRecords.filter(rec => 
-      rec.Month.toLowerCase() === currentStatus.month.toLowerCase() && 
-      rec.FinancialYear === currentStatus.finYear
-    );
+    const curMonth = String(currentStatus.month || '').toLowerCase();
+    return dynamicRecords.filter(rec => {
+      if (!rec) return false;
+      const recMonth = String(rec.Month || '').toLowerCase();
+      const recFinYear = String(rec.FinancialYear || '');
+      return recMonth === curMonth && recFinYear === currentStatus.finYear;
+    });
   }, [dynamicRecords, currentStatus]);
 
   return (
@@ -190,6 +207,79 @@ const AccountingPage: React.FC = () => {
             Real-time Transparency & Accountability
           </p>
         </div>
+
+        {/* Integration Status Notice & Setup Helper */}
+        <div className="max-w-4xl mx-auto mb-8 bg-white border border-gray-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className={`flex h-3 w-3 relative flex-shrink-0`}>
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isLiveConnected ? 'bg-green-400' : 'bg-orange-400'} opacity-75`}></span>
+              <span className={`relative inline-flex rounded-full h-3 w-3 ${isLiveConnected ? 'bg-green-500' : 'bg-orange-500'}`}></span>
+            </span>
+            <div>
+              <p className="text-xs font-bold text-gray-800">
+                {isLiveConnected 
+                  ? 'Live Google Spreadsheet Synchronized' 
+                  : 'Displaying 2026-27 & Verified Baseline Accounting Records'}
+              </p>
+              <p className="text-[11px] text-gray-500">
+                Supports all financial years including 2026-27, 2025-26, and 2024-25.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              onClick={() => setShowSetupGuide(!showSetupGuide)}
+              className="text-xs font-bold text-gray-600 hover:text-orange-600 px-3 py-1.5 rounded-xl border border-gray-200 hover:border-orange-200 bg-gray-50 transition-colors"
+            >
+              {showSetupGuide ? 'Hide Sheet Guide' : 'Sheet Setup Guide'}
+            </button>
+            <button
+              onClick={handleManualSync}
+              disabled={isRefreshing || loading}
+              className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
+            >
+              <svg className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              <span>{isRefreshing ? 'Syncing...' : 'Sync Sheet'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Expandable Google Apps Script Setup Guide */}
+        {showSetupGuide && (
+          <div className="max-w-4xl mx-auto mb-8 p-6 bg-slate-900 text-white rounded-3xl shadow-xl border border-slate-700 animate-fadeIn">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-sm font-black uppercase tracking-wider text-orange-400">Google Spreadsheet Integration for 2026-27 Accounting</h3>
+                <p className="text-xs text-gray-400 mt-1">If your Google Apps Script endpoint returns member records or needs the Accounting sheet handler, add this snippet to your script.</p>
+              </div>
+              <button
+                onClick={handleCopySnippet}
+                className="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold rounded-xl transition-all shadow flex items-center gap-1.5"
+              >
+                {copiedSnippet ? 'Copied to Clipboard!' : 'Copy Accounting.gs Code'}
+              </button>
+            </div>
+            <div className="p-4 bg-slate-950 rounded-2xl font-mono text-[11px] text-gray-300 max-h-56 overflow-y-auto border border-slate-800">
+              <pre>{ACCOUNTING_APPS_SCRIPT_SNIPPET}</pre>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-4 text-[11px] text-gray-400">
+              <span className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-orange-400 rounded-full"></span>
+                Sheet tab name: <strong className="text-white">Accounting</strong> or <strong className="text-white">2026-27</strong>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-orange-400 rounded-full"></span>
+                Columns: <strong className="text-white">FinancialYear, Month, Type, Description, BillLink</strong>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-orange-400 rounded-full"></span>
+                Access permission: <strong className="text-white">Anyone</strong>
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Recent Transactions Section (Only Current Month) */}
         {!loading && recentTransactions.length > 0 && (

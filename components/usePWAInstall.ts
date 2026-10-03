@@ -18,7 +18,7 @@ export function usePWAInstall() {
     setIsInstalled(isStandalone);
 
     // Detect iOS devices
-    const userAgent = window.navigator.userAgent.toLowerCase();
+    const userAgent = String(window.navigator?.userAgent || '').toLowerCase();
     const isIOSDevice = /iphone|ipad|ipod/.test(userAgent);
     setIsIOS(isIOSDevice);
 

@@ -57,6 +57,7 @@ export function getFinancialYearsList(startYear: number = 2024): string[] {
   const currentStartYear = parseInt(currentStartYearStr, 10);
   
   const years: string[] = [];
+  // Only include years up to the current financial year
   for (let y = startYear; y <= currentStartYear; y++) {
     years.push(`${y}-${(y + 1).toString().slice(-2)}`);
   }

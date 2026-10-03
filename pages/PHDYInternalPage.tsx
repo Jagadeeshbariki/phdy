@@ -30,8 +30,22 @@ import {
   KeyRound,
   LogOut,
   Copy,
-  Trash2
+  Trash2,
+  Camera
 } from 'lucide-react';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend, 
+  ResponsiveContainer,
+  AreaChart,
+  Area
+} from 'recharts';
+import CameraModal from '../components/CameraModal';
 
 const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
 const CLOUDINARY_CLOUD_NAME = 'dbohmpxko';
@@ -79,6 +93,9 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
   const [lastSyncTime, setLastSyncTime] = useState<string>('Just now');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isScriptGuideOpen, setIsScriptGuideOpen] = useState(false);
+  const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
+  const [userProfile, setUserProfile] = useState<any>(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [selectedReceipt, setSelectedReceipt] = useState<string | null>(null);
 
   // Add Transaction Form State
@@ -156,36 +173,61 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
     const timeoutMs = 8000;
     try {
       const robustFetch = async () => {
-        // 1. Try GET
-        try {
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), timeoutMs);
-          const res = await fetch(`${SPREADSHEET_API_URL}?type=phdy_funds&_t=${Date.now()}`, { 
-            signal: controller.signal,
-            cache: 'no-store'
-          });
-          clearTimeout(timer);
-          const text = await res.text();
-          if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
-            const parsed = JSON.parse(text);
-            const data = Array.isArray(parsed) ? parsed : (parsed.data || []);
-            if (data.length > 0) return data;
-          }
-        } catch (e) {}
+        // 1. Try multiple GET variations
+        const getVariations = [
+          { type: 'phdy_funds' },
+          { sheet: 'Phdy_funds' },
+          { sheet: '2026-27' },
+          { sheet: 'PHDY_Funds' },
+          { sheet: 'PHDY Funds' },
+          { type: 'accounting', sheet: 'Phdy_funds' },
+          { type: 'accounting', sheet: '2026-27' }
+        ];
 
-        // 2. Try POST fallback
-        try {
-          const res = await fetch(SPREADSHEET_API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({ action: 'get_phdy_funds', type: 'phdy_funds' })
-          });
-          const text = await res.text();
-          if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
-            const parsed = JSON.parse(text);
-            return Array.isArray(parsed) ? parsed : (parsed.data || []);
-          }
-        } catch (e) {}
+        for (const variant of getVariations) {
+          try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 6000);
+            const params = new URLSearchParams({ ...variant, _t: Date.now().toString() });
+            const res = await fetch(`${SPREADSHEET_API_URL}?${params.toString()}`, { 
+              signal: controller.signal,
+              cache: 'no-store'
+            });
+            clearTimeout(timer);
+            const text = await res.text();
+            if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+              const parsed = JSON.parse(text);
+              const data = Array.isArray(parsed) ? parsed : (parsed.data || []);
+              if (data.length > 0) return data;
+            }
+          } catch (e) {}
+        }
+
+        // 2. Try POST fallbacks
+        const postVariations = [
+          { action: 'get_phdy_funds', type: 'phdy_funds' },
+          { action: 'get_accounting', sheet: 'Phdy_funds' },
+          { action: 'get_accounting', sheet: '2026-27' },
+          { action: 'get_sheet', sheet: 'Phdy_funds' },
+          { action: 'get_sheet', sheet: '2026-27' },
+          { action: 'get_data', sheet: 'Phdy_funds' }
+        ];
+
+        for (const variant of postVariations) {
+          try {
+            const res = await fetch(SPREADSHEET_API_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify(variant)
+            });
+            const text = await res.text();
+            if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
+              const parsed = JSON.parse(text);
+              const data = Array.isArray(parsed) ? parsed : (parsed.data || []);
+              if (data.length > 0) return data;
+            }
+          } catch (e) {}
+        }
         return [];
       };
 
@@ -194,17 +236,17 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
       // Check if data is valid Phdy_funds records
       if (Array.isArray(data) && data.length > 0) {
         const parsedFunds: PHDYFundTransaction[] = data.map((item, idx) => {
-          const rawAmount = item.Amount ?? item.amount ?? item.Rupees ?? item.rupees ?? item['Amount (Rs)'] ?? item['Amount(Rs)'] ?? 0;
+          const rawAmount = item.Amount ?? item.amount ?? item.Rupees ?? item.rupees ?? item.Contribution ?? item.Donation ?? item.Total ?? item['Amount (Rs)'] ?? item['Amount(Rs)'] ?? item.Paid ?? item['Paid Amount'] ?? item.Amt ?? item['Rs.'] ?? 0;
           const cleanAmount = typeof rawAmount === 'number' 
             ? rawAmount 
             : parseFloat(String(rawAmount).replace(/[^0-9.-]+/g, '')) || 0;
 
-          const rawType = item.Type ?? item.type ?? item['Transaction Type'] ?? item['Credit/Debit'] ?? (cleanAmount < 0 ? 'Debit' : 'Credit');
-          const normalizedType = String(rawType).toLowerCase().includes('deb') || String(rawType).toLowerCase().includes('exp')
+          const rawType = item.Type ?? item.type ?? item['Transaction Type'] ?? item['Credit/Debit'] ?? item.Category ?? (cleanAmount < 0 ? 'Debit' : 'Credit');
+          const normalizedType = String(rawType).toLowerCase().includes('deb') || String(rawType).toLowerCase().includes('exp') || String(rawType).toLowerCase().includes('out')
             ? 'Debit' 
             : 'Credit';
 
-          const rawDate = String(item.Date ?? item.date ?? item.Timestamp ?? item.timestamp ?? '').trim();
+          const rawDate = String(item.Date ?? item.date ?? item.Timestamp ?? item.timestamp ?? item.Day ?? '').trim();
           let formattedDate = rawDate;
           if (rawDate && rawDate.includes('-') && !isNaN(new Date(rawDate).getTime())) {
             try {
@@ -212,7 +254,7 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
             } catch {}
           }
 
-          const rawName = String(item.Name ?? item.name ?? item.Contributor ?? item.contributor ?? item.Donor ?? item.donor ?? item.Person ?? '').trim();
+          const rawName = String(item.Name ?? item.name ?? item.Contributor ?? item.contributor ?? item.Donor ?? item.donor ?? item.Person ?? item.Member ?? item['Member Name'] ?? item.MemberName ?? '').trim();
 
           return {
             id: item.Id ?? item.id ?? item.TxnID ?? `FND-${1001 + idx}`,
@@ -220,7 +262,7 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
             name: rawName || 'General Youth Fund',
             type: normalizedType,
             amount: Math.abs(cleanAmount),
-            purpose: item.Purpose ?? item.purpose ?? item.Description ?? item.description ?? item.Reason ?? 'PHDY Donation',
+            purpose: item.Purpose ?? item.purpose ?? item.Description ?? item.description ?? item.Reason ?? item.Details ?? item.Particulars ?? 'PHDY Donation',
             category: item.Category ?? item.category ?? 'General Category',
             mode: item.Mode ?? item.mode ?? item['Payment Mode'] ?? item.PaymentMode ?? 'UPI',
             receiptUrl: item.BillLink ?? item.billLink ?? item.Receipt ?? item.receipt ?? item.Proof ?? item.Bill ?? '',
@@ -244,7 +286,21 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
 
   useEffect(() => {
     fetchFundsFromSheet();
+    fetchUserProfile();
   }, []);
+
+  const fetchUserProfile = async () => {
+    if (!loggedInUser?.email) return;
+    try {
+      const res = await fetch(`${SPREADSHEET_API_URL}?type=members&_t=${Date.now()}`);
+      const data = await res.json();
+      const members = Array.isArray(data) ? data : (data.data || []);
+      const current = members.find((m: any) => 
+        String(m.Email || m.email || '').toLowerCase() === loggedInUser.email.toLowerCase()
+      );
+      if (current) setUserProfile(current);
+    } catch (e) {}
+  };
 
   // Filter calculations: Extract unique months/periods
   const availableMonths = useMemo(() => {
@@ -267,26 +323,39 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
 
   // Filtered transactions
   const filteredFunds = useMemo(() => {
+    const q = String(searchQuery || '').trim().toLowerCase();
+    const typeFilter = String(filterType || 'All').toLowerCase();
+    const monthFilter = String(filterMonth || 'All').toLowerCase();
+
     return funds.filter(f => {
+      if (!f) return false;
+      const name = String(f.name || '').toLowerCase();
+      const purpose = String(f.purpose || '').toLowerCase();
+      const category = String(f.category || '').toLowerCase();
+      const mode = String(f.mode || '').toLowerCase();
+      const date = String(f.date || '').toLowerCase();
+      const id = String(f.id || '').toLowerCase();
+      const fType = String(f.type || '').toLowerCase();
+
       // Search across name, purpose, category, mode, id, date
       const matchesSearch = 
-        !searchQuery.trim() ||
-        f.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        f.purpose.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (f.category && f.category.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (f.mode && f.mode.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        f.date.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        f.id.toLowerCase().includes(searchQuery.toLowerCase());
+        !q ||
+        name.includes(q) ||
+        purpose.includes(q) ||
+        category.includes(q) ||
+        mode.includes(q) ||
+        date.includes(q) ||
+        id.includes(q);
 
       // Type Filter
       const matchesType = 
-        filterType === 'All' || 
-        f.type.toLowerCase() === filterType.toLowerCase();
+        typeFilter === 'all' || 
+        fType === typeFilter;
 
       // Month / Period Filter
       const matchesMonth = 
-        filterMonth === 'All' || 
-        f.date.toLowerCase() === filterMonth.toLowerCase();
+        monthFilter === 'all' || 
+        date === monthFilter;
 
       // Amount Status Filter
       const matchesAmountStatus =
@@ -309,7 +378,8 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
     }>();
 
     funds.forEach(f => {
-      const memberName = (f.name || 'General Youth Fund').trim();
+      if (!f) return;
+      const memberName = String(f.name || 'General Youth Fund').trim();
       if (!memberMap.has(memberName)) {
         memberMap.set(memberName, {
           name: memberName,
@@ -323,18 +393,19 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
       rec.totalEntries += 1;
       if (f.amount > 0) {
         rec.totalContributed += f.amount;
-        rec.paidRecords.push({ month: f.date, amount: f.amount, mode: f.mode || 'UPI' });
+        rec.paidRecords.push({ month: String(f.date || ''), amount: f.amount, mode: f.mode || 'UPI' });
       } else {
         rec.zeroMonthsCount += 1;
       }
     });
 
     const list = Array.from(memberMap.values());
-    if (!searchQuery.trim()) {
+    const q = String(searchQuery || '').trim().toLowerCase();
+    if (!q) {
       return list.sort((a, b) => b.totalContributed - a.totalContributed);
     }
     return list
-      .filter(m => m.name.toLowerCase().includes(searchQuery.toLowerCase()))
+      .filter(m => String(m.name || '').toLowerCase().includes(q))
       .sort((a, b) => b.totalContributed - a.totalContributed);
   }, [funds, searchQuery]);
 
@@ -346,11 +417,13 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
     const uniqueMembers = new Set<string>();
 
     funds.forEach(f => {
-      if (f.name && f.name.trim()) uniqueMembers.add(f.name.trim());
+      if (!f) return;
+      if (f.name && String(f.name).trim()) uniqueMembers.add(String(f.name).trim());
       if (f.amount > 0) {
         paidCount++;
       }
-      if (f.type.toLowerCase() === 'credit' || f.type.toLowerCase() === 'income') {
+      const t = String(f.type || '').toLowerCase();
+      if (t === 'credit' || t === 'income') {
         inflow += Number(f.amount) || 0;
       } else {
         outflow += Number(f.amount) || 0;
@@ -365,6 +438,52 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
       totalRecordsCount: funds.length,
       membersCount: uniqueMembers.size
     };
+  }, [funds]);
+
+  // Chart Data Calculation
+  const chartData = useMemo(() => {
+    const months = ['October', 'November', 'December', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September'];
+    const dataMap = new Map<string, { month: string, inflow: number, outflow: number, activities: number }>();
+    
+    // Initialize with standard months
+    months.forEach(m => {
+      dataMap.set(m, { month: m, inflow: 0, outflow: 0, activities: 0 });
+    });
+
+    funds.forEach(f => {
+      if (!f || !f.date) return;
+      const monthKey = f.date.trim();
+      if (!dataMap.has(monthKey)) {
+        // If it's a date string, extract month or just use it
+        if (monthKey.includes('-')) {
+          try {
+            const dateObj = new Date(monthKey);
+            const mName = dateObj.toLocaleString('default', { month: 'long' });
+            if (dataMap.has(mName)) {
+              const d = dataMap.get(mName)!;
+              const type = String(f.type || '').toLowerCase();
+              if (type === 'credit' || type === 'income') d.inflow += f.amount;
+              else {
+                d.outflow += f.amount;
+                d.activities += 1;
+              }
+            }
+            return;
+          } catch {}
+        }
+        return;
+      }
+
+      const d = dataMap.get(monthKey)!;
+      const type = String(f.type || '').toLowerCase();
+      if (type === 'credit' || type === 'income') d.inflow += f.amount;
+      else {
+        d.outflow += f.amount;
+        d.activities += 1;
+      }
+    });
+
+    return Array.from(dataMap.values());
   }, [funds]);
 
   // Upload file to Cloudinary
@@ -422,6 +541,7 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({
             action: 'add_phdy_fund',
+            sheet: 'Phdy_funds',
             Date: newTxn.date,
             Name: newTxn.name,
             Type: newTxn.type,
@@ -522,6 +642,33 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  // Handle Camera Capture for Profile Update
+  const handleCameraCapture = async (blob: Blob) => {
+    try {
+      setIsUploadingPhoto(true);
+      const file = new File([blob], `profile_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      const photoUrl = await uploadReceipt(file);
+      
+      // Update in Spreadsheet
+      await fetch(SPREADSHEET_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'update_member_photo',
+          email: loggedInUser?.email,
+          ImageURL: photoUrl
+        })
+      });
+      
+      setUserProfile((prev: any) => ({ ...prev, ImageURL: photoUrl }));
+      alert("Profile photo updated successfully!");
+    } catch (err) {
+      alert("Failed to update profile photo");
+    } finally {
+      setIsUploadingPhoto(false);
+    }
   };
 
   // If the user is not a verified PHDY Member or Admin, show the access barrier
@@ -672,6 +819,11 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
 
   return (
     <div className="animate-fadeIn min-h-screen bg-slate-50/50 pb-20">
+      <CameraModal 
+        isOpen={isCameraModalOpen} 
+        onClose={() => setIsCameraModalOpen(false)} 
+        onCapture={handleCameraCapture} 
+      />
       {/* Top Banner Header for Authenticated Members */}
       <div className="bg-gradient-to-r from-orange-700 via-orange-600 to-amber-600 text-white pt-10 pb-16 px-4 shadow-xl border-b border-orange-500/30">
         <div className="max-w-7xl mx-auto">
@@ -690,12 +842,40 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              {/* Member Status Badge */}
-              <div className="px-3.5 py-2 bg-white/15 backdrop-blur-md rounded-xl text-white text-xs font-bold border border-white/20 flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-300" />
-                <span className="truncate max-w-[170px]" title={loggedInUser?.email}>
-                  {roleLower === 'admin' ? '👑 Admin' : (roleLower === 'treasurer' || roleLower === 'tressurer') ? '💰 Treasurer' : '🛡️ Member'}: {loggedInUser?.email}
-                </span>
+              {/* Member Profile/Status Badge */}
+              <div className="flex items-center gap-2 bg-white/15 backdrop-blur-md rounded-2xl p-1.5 border border-white/20 shadow-lg">
+                <div 
+                  onClick={() => setIsCameraModalOpen(true)}
+                  className="relative group cursor-pointer"
+                >
+                  <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-800 border-2 border-white/30 flex items-center justify-center">
+                    {userProfile?.ImageURL ? (
+                      <img src={userProfile.ImageURL} className="w-full h-full object-cover" />
+                    ) : (
+                      <User className="w-6 h-6 text-white/50" />
+                    )}
+                  </div>
+                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-xl">
+                    <Camera className="w-4 h-4 text-white" />
+                  </div>
+                  {isUploadingPhoto && (
+                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center rounded-xl">
+                      <RefreshCw className="w-4 h-4 text-white animate-spin" />
+                    </div>
+                  )}
+                </div>
+                
+                <div className="pr-3">
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
+                    <span className="text-[10px] font-black text-white/90 uppercase tracking-widest">
+                      {roleLower === 'admin' ? 'Admin' : (roleLower === 'treasurer' || roleLower === 'tressurer') ? 'Treasurer' : 'Verified Member'}
+                    </span>
+                  </div>
+                  <span className="text-xs font-bold text-white truncate max-w-[150px] block" title={loggedInUser?.email}>
+                    {loggedInUser?.email}
+                  </span>
+                </div>
               </div>
 
               {onLogout && (
@@ -944,6 +1124,137 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
                   </div>
                 </div>
 
+                {/* Visual Summary Charts Section */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Group Contributions & Expenditure Over Time */}
+                  <div className="bg-white rounded-3xl p-6 md:p-8 shadow-xl border border-gray-100">
+                    <div className="flex items-center justify-between mb-6">
+                      <div>
+                        <h3 className="text-xl font-black text-gray-900 tracking-tight">Growth & Expenditure</h3>
+                        <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">Monthly Financial Trends</p>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
+                          <span className="text-[10px] font-bold text-gray-600">Inflow</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-2.5 h-2.5 rounded-full bg-rose-500"></div>
+                          <span className="text-[10px] font-bold text-gray-600">Outflow</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="h-[250px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="colorInflow" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
+                              <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                            </linearGradient>
+                            <linearGradient id="colorOutflow" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.1}/>
+                              <stop offset="95%" stopColor="#f43f5e" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis 
+                            dataKey="month" 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }}
+                            dy={10}
+                            tickFormatter={(val) => val.substring(0, 3)}
+                          />
+                          <YAxis 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }}
+                            tickFormatter={(val) => `₹${val}`}
+                          />
+                          <Tooltip 
+                            contentStyle={{ 
+                              borderRadius: '16px', 
+                              border: 'none', 
+                              boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+                              fontSize: '12px',
+                              fontWeight: 'bold'
+                            }}
+                          />
+                          <Area 
+                            type="monotone" 
+                            dataKey="inflow" 
+                            stroke="#10b981" 
+                            strokeWidth={3}
+                            fillOpacity={1} 
+                            fill="url(#colorInflow)" 
+                            name="Monthly Inflow"
+                          />
+                          <Area 
+                            type="monotone" 
+                            dataKey="outflow" 
+                            stroke="#f43f5e" 
+                            strokeWidth={3}
+                            fillOpacity={1} 
+                            fill="url(#colorOutflow)" 
+                            name="Monthly Outflow"
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* Development Activity Volume */}
+                  <div className="bg-white rounded-3xl p-6 md:p-8 shadow-xl border border-gray-100">
+                    <div className="flex items-center justify-between mb-6">
+                      <div>
+                        <h3 className="text-xl font-black text-gray-900 tracking-tight">Development Velocity</h3>
+                        <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">Work Activities Volume</p>
+                      </div>
+                      <div className="w-10 h-10 rounded-2xl bg-orange-100 flex items-center justify-center text-orange-600 shadow-sm">
+                        <Layers className="w-5 h-5" />
+                      </div>
+                    </div>
+                    <div className="h-[250px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis 
+                            dataKey="month" 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }}
+                            dy={10}
+                            tickFormatter={(val) => val.substring(0, 3)}
+                          />
+                          <YAxis 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }}
+                          />
+                          <Tooltip 
+                            cursor={{ fill: '#f8fafc' }}
+                            contentStyle={{ 
+                              borderRadius: '16px', 
+                              border: 'none', 
+                              boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+                              fontSize: '12px',
+                              fontWeight: 'bold'
+                            }}
+                          />
+                          <Bar 
+                            dataKey="activities" 
+                            fill="#f97316" 
+                            radius={[6, 6, 0, 0]} 
+                            name="Work Entries"
+                            barSize={30}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Live Google Sheet Status & Transparency Banner */}
                 <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border border-emerald-200/80 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
                   <div className="flex items-center gap-3">
@@ -1164,7 +1475,8 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
                           </thead>
                           <tbody className="divide-y divide-gray-50">
                             {filteredFunds.map((txn, idx) => {
-                              const isCredit = txn.type.toLowerCase() === 'credit' || txn.type.toLowerCase() === 'income';
+                              const t = String(txn?.type || '').toLowerCase();
+                              const isCredit = t === 'credit' || t === 'income';
                               const isZero = txn.amount === 0;
 
                               return (

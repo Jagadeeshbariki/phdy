@@ -457,7 +457,7 @@ const OurWorksPage: React.FC = () => {
 
           // Show newest spreadsheet records first, followed by historical catalog
           const staticWorks = WORKS_DATA.filter(
-            staticItem => !formattedWorks.some(fw => fw.title.toLowerCase() === (staticItem.title || '').trim().toLowerCase())
+            staticItem => !formattedWorks.some(fw => String(fw.title || '').trim().toLowerCase() === String(staticItem.title || '').trim().toLowerCase())
           );
           const combinedWorks = [...[...formattedWorks].reverse(), ...staticWorks];
           setWorks(combinedWorks);

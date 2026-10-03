@@ -1,4 +1,4 @@
-const CACHE_NAME = 'phdy-pwa-v4';
+const CACHE_NAME = 'phdy-pwa-v10';
 
 const PRECACHE_ASSETS = [
   '/',
