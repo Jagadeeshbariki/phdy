@@ -55,6 +55,9 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, onLogout }) =>
   // Village Map (All users)
   navItems.push({ id: 'villagemap', label: 'Village Map' });
 
+  // Our Works (All users)
+  navItems.push({ id: 'ourworks', label: 'Our Works' });
+
   // Membership Actions based on authentic membership state
   if (user) {
     if (membership && membership.status === 'active') {

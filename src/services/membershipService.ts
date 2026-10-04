@@ -20,7 +20,7 @@ export const membershipService = {
     const fileExt = file.name.split('.').pop() || 'jpg';
     const filePath = `${userId}/profile_${Date.now()}.${fileExt}`;
 
-    // Upload directly to 'member-photos' bucket
+    // Try uploading to 'member-photos' bucket
     const bucketName = 'member-photos';
     const { error: uploadError } = await supabase.storage
       .from(bucketName)
@@ -29,31 +29,28 @@ export const membershipService = {
         cacheControl: '3600',
       });
 
-    if (uploadError) {
-      // If member-photos gives an error, try membership-photos as secondary fallback
-      const { error: secondaryError } = await supabase.storage
-        .from('membership-photos')
-        .upload(filePath, file, {
-          upsert: true,
-          cacheControl: '3600',
-        });
-
-      if (secondaryError) {
-        throw new Error(`Photo upload failed: ${uploadError.message}. Please make sure the 'member-photos' bucket is created and set to Public in your Supabase Storage.`);
-      }
-
-      const { data } = supabase.storage
-        .from('membership-photos')
+    if (!uploadError) {
+      const { data: { publicUrl } } = supabase.storage
+        .from(bucketName)
         .getPublicUrl(filePath);
-
-      return data.publicUrl;
+      return publicUrl;
     }
 
-    const { data: { publicUrl } } = supabase.storage
-      .from(bucketName)
-      .getPublicUrl(filePath);
-
-    return publicUrl;
+    // If upload fails due to RLS policy or missing bucket permissions, fallback to Base64 Data URL
+    console.warn('[Supabase Storage Notice]: Storage upload encountered RLS/bucket error, using Base64 data fallback:', uploadError.message);
+    
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          resolve(reader.result);
+        } else {
+          reject(new Error('Failed to encode image file.'));
+        }
+      };
+      reader.onerror = () => reject(new Error('Failed to read image file.'));
+      reader.readAsDataURL(file);
+    });
   },
 
   // 2. Submit "Become PHDY Member" Application
