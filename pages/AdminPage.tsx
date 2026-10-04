@@ -1113,14 +1113,13 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
             await supabase.from('membership_requests').update({ status: 'Approved' }).eq('phone', req.phone);
           }
 
-          // Add to members table directly with schema-accurate payload
+          // Add to members table directly with schema-accurate payload and optional user_id
           try {
             const dobVal = req.dob && String(req.dob).trim() !== '' ? req.dob : null;
             const uIdVal = req.user_id && String(req.user_id).length > 10 ? req.user_id : null;
             const randNum = `PHDY-${Math.floor(100000 + Math.random() * 900000)}`;
 
-            await supabase.from('members').upsert({
-              user_id: uIdVal,
+            const memberPayload: any = {
               membership_number: randNum,
               full_name: req.fullName || finalEmailLower.split('@')[0],
               qualification: req.qualification || req.education || req.dob || 'Graduate',
@@ -1130,7 +1129,16 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
               status: 'active',
               joined_at: new Date().toISOString(),
               approved_at: new Date().toISOString()
-            }, { onConflict: 'user_id' });
+            };
+            if (uIdVal) {
+              memberPayload.user_id = uIdVal;
+            }
+
+            if (uIdVal) {
+              await supabase.from('members').upsert(memberPayload, { onConflict: 'user_id' });
+            } else {
+              await supabase.from('members').insert([memberPayload]);
+            }
           } catch (e) {
             try {
               await supabase.from('members').insert([{
