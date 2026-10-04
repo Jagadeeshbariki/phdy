@@ -232,16 +232,38 @@ export const membershipService = {
 
     const newMember = { id: req.id, full_name: req.profiles?.full_name || 'PHDY Member', membership_number: membershipNumber };
 
-    // Update status in `membership_requests`
-    await supabase
-      .from('membership_requests')
-      .update({
-        status: 'approved',
-        reviewed_at: now,
-        reviewed_by: adminUserId || null,
-        admin_remarks: 'Approved by Administrator',
-      })
-      .eq('id', requestId);
+    // Update status in `membership_requests` securely and robustly
+    try {
+      await supabase
+        .from('membership_requests')
+        .update({
+          status: 'approved',
+          reviewed_at: now,
+          reviewed_by: adminUserId || null,
+          admin_remarks: 'Approved by Administrator',
+        })
+        .eq('id', requestId);
+
+      await supabase
+        .from('membership_requests')
+        .update({
+          status: 'Approved',
+          reviewed_at: now,
+        })
+        .eq('id', requestId);
+
+      if (req.user_id) {
+        await supabase
+          .from('membership_requests')
+          .update({
+            status: 'approved',
+            reviewed_at: now,
+          })
+          .eq('user_id', req.user_id);
+      }
+    } catch (e) {
+      console.warn('membership_requests update warning:', e);
+    }
 
     return {
       success: true,

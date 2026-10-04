@@ -1097,14 +1097,20 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       let supaUpdated = false;
       if (isSupabaseConfigured()) {
         try {
-          // Update membership_requests by ID, Email, or Phone to guarantee database record update
+          // Update membership_requests by ID, user_id, Email, or Phone to guarantee database record update
           if (req.id) {
             await supabase.from('membership_requests').update({ status: 'approved' }).eq('id', req.id);
             const { error: err1 } = await supabase.from('membership_requests').update({ status: 'Approved' }).eq('id', req.id);
             if (!err1) supaUpdated = true;
           }
+          if (req.user_id) {
+            await supabase.from('membership_requests').update({ status: 'approved' }).eq('user_id', req.user_id);
+            await supabase.from('membership_requests').update({ status: 'Approved' }).eq('user_id', req.user_id);
+            supaUpdated = true;
+          }
           if (finalEmailLower) {
             await supabase.from('membership_requests').update({ status: 'approved' }).eq('email', finalEmailLower);
+            await supabase.from('membership_requests').update({ status: 'approved' }).ilike('email', finalEmailLower);
             const { error: err2 } = await supabase.from('membership_requests').update({ status: 'Approved' }).eq('email', finalEmailLower);
             if (!err2) supaUpdated = true;
           }
