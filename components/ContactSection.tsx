@@ -22,6 +22,7 @@ const ContactSection: React.FC = () => {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [dbStatus, setDbStatus] = useState<{ saved: boolean; message: string; isRlsError?: boolean } | null>(null);
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/\D/g, '');
@@ -71,20 +72,47 @@ const ContactSection: React.FC = () => {
       }
 
       // 1. Submit to Supabase
+      let supaSuccess = false;
+      let supaErrObj: any = null;
       if (isSupabaseConfigured()) {
         try {
-          await membershipService.submitJoinRequest({
+          const res = await membershipService.submitJoinRequest({
             fullName: formData.fullName.trim(),
             phone: formData.phone.trim(),
             email: formData.email.trim(),
-            dob: formData.dob,
+            education: formData.dob || '',
             address: formData.address.trim(),
             motivation: formData.reason.trim(),
             photoFile: selectedFile
           });
+          if (res?.success) {
+            supaSuccess = true;
+          }
         } catch (supabaseErr: any) {
-          console.warn("[Supabase] Join request submission error:", supabaseErr.message);
+          supaErrObj = supabaseErr;
+          console.warn("[Supabase] Join request submission error:", supabaseErr);
         }
+      }
+
+      if (supaSuccess) {
+        setDbStatus({
+          saved: true,
+          message: "Request successfully inserted into Supabase database (membership_requests)."
+        });
+      } else if (supaErrObj) {
+        const isRls = supaErrObj.code === '42501' || String(supaErrObj.message || '').includes('row-level security');
+        setDbStatus({
+          saved: false,
+          message: isRls 
+            ? "Database Row Level Security (RLS) blocked the insert. Please run the SQL Public Insert policy script in your Supabase SQL editor." 
+            : (supaErrObj.message || 'Could not insert into Supabase database.'),
+          isRlsError: isRls
+        });
+      } else {
+        setDbStatus({
+          saved: false,
+          message: "Saved to browser local memory (Supabase not configured)."
+        });
       }
 
       // 2. Save to local cache for instant UI feedback
@@ -145,14 +173,31 @@ const ContactSection: React.FC = () => {
           </div>
 
           {submitted ? (
-            <div className="bg-green-50 text-green-700 p-8 rounded-3xl border border-green-200 text-center animate-fadeIn">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className={`p-8 rounded-3xl border text-center animate-fadeIn ${
+              dbStatus?.saved ? 'bg-green-50 text-green-800 border-green-200' : 'bg-amber-50 text-amber-900 border-amber-200'
+            }`}>
+              <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
+                dbStatus?.saved ? 'bg-green-100 text-green-600' : 'bg-amber-100 text-amber-600'
+              }`}>
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                 </svg>
               </div>
               <h4 className="text-xl font-bold mb-2">Thank You!</h4>
-              <p>Your request has been submitted. Our admin team will review it soon.</p>
+              <p className="text-sm font-medium mb-4">Your application has been received. Our admin team will review it soon.</p>
+              
+              {dbStatus && (
+                <div className={`text-xs p-3 rounded-2xl border text-left ${
+                  dbStatus.saved 
+                    ? 'bg-white/80 border-green-300 text-green-900' 
+                    : 'bg-white/80 border-amber-300 text-amber-900'
+                }`}>
+                  <div className="font-bold flex items-center gap-1.5 mb-1">
+                    <span>{dbStatus.saved ? '✅ Database Sync' : '⚠️ Database Notice'}</span>
+                  </div>
+                  <p className="leading-relaxed">{dbStatus.message}</p>
+                </div>
+              )}
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-6">

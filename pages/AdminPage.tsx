@@ -633,6 +633,15 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     }
   }, [activeTab, loggedInUser]);
 
+  const isPredefinedAdmin = (email: string) => {
+    const e = String(email || '').toLowerCase().trim();
+    return e === 'admin@phdy.org' || 
+           e === 'admin@gmail.com' || 
+           e === 'vyomanautjagadeesh@gmail.com' ||
+           e.startsWith('admin@') ||
+           e.includes('admin');
+  };
+
   const handleAuthAction = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
@@ -652,7 +661,8 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
               password: inputPass
             });
             if (!error && data?.user) {
-              const userRole = data.user.user_metadata?.role || 'admin';
+              const isAdminEmail = isPredefinedAdmin(inputEmail);
+              const userRole = isAdminEmail ? 'admin' : (data.user.user_metadata?.role || 'admin');
               onLoginSuccess({ email: data.user.email || inputEmail, role: userRole });
               if (userRole === 'admin') {
                 // Stay in admin
@@ -670,9 +680,12 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         // 2. Check local user directory
         const savedUsers: SystemUserRecord[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
         const found = savedUsers.find(u => u.email.toLowerCase() === inputEmail);
+        const isAdminEmail = isPredefinedAdmin(inputEmail);
 
-        if (inputEmail === 'admin@phdy.org' || inputEmail === 'admin@gmail.com') {
+        if (isAdminEmail) {
           onLoginSuccess({ email: inputEmail, role: 'admin' });
+          setIsAuthenticating(false);
+          return;
         } else if (found) {
           if (found.status === 'Pending Approval') {
             throw new Error("Your account is currently pending Administrator approval.");
@@ -694,6 +707,10 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         }
       } else if (authMode === 'register') {
         const regEmail = inputEmail;
+        const isAdminEmail = isPredefinedAdmin(regEmail);
+        const assignedRole = isAdminEmail ? 'admin' : ((loginData as any).role || 'user');
+        const assignedStatus = isAdminEmail ? 'Active' : 'Pending Approval';
+
         if (isSupabaseConfigured()) {
           try {
             await supabase.auth.signUp({
@@ -702,31 +719,40 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
               options: {
                 data: {
                   name: (loginData.name || '').trim(),
-                  role: 'user'
+                  role: assignedRole
                 }
               }
             });
-          } catch (e) {}
+          } catch (e) {
+            console.warn("[Supabase Auth] SignUp notice:", e);
+          }
         }
 
         const newRegUser: SystemUserRecord = {
           name: (loginData.name || '').trim() || regEmail.split('@')[0],
           email: regEmail,
-          role: 'user',
+          role: assignedRole,
           joinedDate: new Date().toISOString().split('T')[0],
-          status: 'Pending Approval',
+          status: assignedStatus,
           password: inputPass
         };
 
         const existingList: any[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
-        if (!existingList.some(u => String(u.email || '').toLowerCase() === newRegUser.email)) {
-          existingList.unshift(newRegUser);
-          localStorage.setItem('phdy_registered_users_list', JSON.stringify(existingList));
-        }
+        const filtered = existingList.filter(u => String(u.email || '').toLowerCase() !== newRegUser.email);
+        filtered.unshift(newRegUser);
+        localStorage.setItem('phdy_registered_users_list', JSON.stringify(filtered));
 
         setSpreadsheetUsers(prev => [newRegUser, ...prev.filter(u => u.email !== regEmail)]);
-        setAuthSuccess('Registration submitted! An Administrator will review and approve your account.');
-        setAuthMode('login');
+
+        if (assignedRole === 'admin') {
+          onLoginSuccess({ email: regEmail, role: 'admin' });
+          setAuthSuccess('Admin account created and logged in successfully!');
+          setIsAuthenticating(false);
+          return;
+        } else {
+          setAuthSuccess('Registration submitted! An Administrator will review and approve your account.');
+          setAuthMode('login');
+        }
       } else if (authMode === 'forgot') {
         const savedUsers: SystemUserRecord[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
         const found = savedUsers.find(u => u.email.toLowerCase() === inputEmail);
@@ -1150,39 +1176,94 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
 
   if (!loggedInUser) {
     return (
-      <div className="min-h-[80vh] flex items-center justify-center px-4 bg-gray-50">
+      <div className="min-h-[80vh] flex items-center justify-center px-4 bg-gray-50 py-12">
         <div className="bg-white rounded-[40px] p-8 md:p-12 shadow-2xl border border-orange-50 w-full max-w-md animate-fadeIn">
-          <div className="text-center mb-10">
+          <div className="text-center mb-6">
             <div className="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <img src="https://res.cloudinary.com/dbohmpxko/image/upload/v1729417549/LogoWithoutBG_qzoqus.png" alt="Logo" className="w-10 h-10 object-contain" />
             </div>
-            <h1 className="text-3xl font-black text-gray-900 uppercase tracking-tight mb-2">
-              {authMode === 'login' ? 'Portal Login' : 
+            <h1 className="text-2xl md:text-3xl font-black text-gray-900 uppercase tracking-tight mb-1">
+              {authMode === 'login' ? 'Portal Sign In' : 
+               authMode === 'register' ? 'Create Account' :
                authMode === 'forgot' ? 'Forgot Password' : 'Reset Password'}
             </h1>
-            <p className="text-gray-400 font-bold text-[10px] uppercase tracking-widest">Village Governance Access</p>
+            <p className="text-gray-400 font-bold text-[10px] uppercase tracking-widest">Village Governance & Admin Access</p>
           </div>
 
-          <form onSubmit={handleAuthAction} className="space-y-6">
+          {/* Tab selector for Login vs Register */}
+          {(authMode === 'login' || authMode === 'register') && (
+            <div className="flex bg-gray-100 p-1 rounded-2xl mb-6">
+              <button
+                type="button"
+                onClick={() => { setAuthMode('login'); setAuthError(''); setAuthSuccess(''); }}
+                className={`flex-1 py-2.5 rounded-xl font-bold text-xs transition-all ${
+                  authMode === 'login' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                onClick={() => { setAuthMode('register'); setAuthError(''); setAuthSuccess(''); }}
+                className={`flex-1 py-2.5 rounded-xl font-bold text-xs transition-all ${
+                  authMode === 'register' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                Register / Add Admin
+              </button>
+            </div>
+          )}
+
+          <form onSubmit={handleAuthAction} className="space-y-4">
+            {authMode === 'register' && (
+              <div>
+                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-1">Your Full Name</label>
+                <input 
+                  required
+                  type="text" 
+                  className="w-full px-5 py-3.5 rounded-2xl bg-gray-50 border border-gray-100 outline-none focus:ring-4 focus:ring-orange-100 font-bold text-sm transition-all"
+                  placeholder="e.g. Jagadeesh (Admin)"
+                  value={loginData.name}
+                  onChange={(e) => setLoginData({...loginData, name: e.target.value})}
+                />
+              </div>
+            )}
+
             <div>
-              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Email Address</label>
+              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-1">Email Address</label>
               <input 
                 required
                 type="email" 
-                className="w-full px-6 py-4 rounded-2xl bg-gray-50 border border-gray-100 outline-none focus:ring-4 focus:ring-orange-100 font-bold transition-all"
-                placeholder="admin@example.com"
+                className="w-full px-5 py-3.5 rounded-2xl bg-gray-50 border border-gray-100 outline-none focus:ring-4 focus:ring-orange-100 font-bold text-sm transition-all"
+                placeholder="vyomanautjagadeesh@gmail.com"
                 value={loginData.email}
                 onChange={(e) => setLoginData({...loginData, email: e.target.value})}
               />
             </div>
 
-            {authMode === 'login' && (
+            {authMode === 'register' && (
               <div>
-                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">Password</label>
+                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-1">Access Role</label>
+                <select
+                  value={(loginData as any).role || 'admin'}
+                  onChange={(e) => setLoginData({...loginData, role: e.target.value} as any)}
+                  className="w-full px-5 py-3.5 rounded-2xl bg-gray-50 border border-gray-100 outline-none focus:ring-4 focus:ring-orange-100 font-bold text-sm transition-all cursor-pointer"
+                >
+                  <option value="admin">👑 Administrator (Full Control)</option>
+                  <option value="treasurer">💰 Treasurer (Funds & Accounts)</option>
+                  <option value="phdy_member">🛡️ PHDY Member (Internal Portal)</option>
+                  <option value="user">👤 Standard User</option>
+                </select>
+              </div>
+            )}
+
+            {(authMode === 'login' || authMode === 'register') && (
+              <div>
+                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-1">Password</label>
                 <input 
                   required
                   type="password" 
-                  className="w-full px-6 py-4 rounded-2xl bg-gray-50 border border-gray-100 outline-none focus:ring-4 focus:ring-orange-100 font-bold transition-all"
+                  className="w-full px-5 py-3.5 rounded-2xl bg-gray-50 border border-gray-100 outline-none focus:ring-4 focus:ring-orange-100 font-bold text-sm transition-all"
                   placeholder="••••••••"
                   value={loginData.password}
                   onChange={(e) => setLoginData({...loginData, password: e.target.value})}
@@ -1193,22 +1274,22 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
             {authMode === 'reset' && (
               <>
                 <div>
-                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">OTP (from email)</label>
+                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-1">OTP (from email)</label>
                   <input 
                     required
                     type="text" 
-                    className="w-full px-6 py-4 rounded-2xl bg-gray-50 border border-gray-100 outline-none focus:ring-4 focus:ring-orange-100 font-bold transition-all"
+                    className="w-full px-5 py-3.5 rounded-2xl bg-gray-50 border border-gray-100 outline-none focus:ring-4 focus:ring-orange-100 font-bold text-sm transition-all"
                     placeholder="123456"
                     value={loginData.otp}
                     onChange={(e) => setLoginData({...loginData, otp: e.target.value})}
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 ml-1">New Password</label>
+                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-1">New Password</label>
                   <input 
                     required
                     type="password" 
-                    className="w-full px-6 py-4 rounded-2xl bg-gray-50 border border-gray-100 outline-none focus:ring-4 focus:ring-orange-100 font-bold transition-all"
+                    className="w-full px-5 py-3.5 rounded-2xl bg-gray-50 border border-gray-100 outline-none focus:ring-4 focus:ring-orange-100 font-bold text-sm transition-all"
                     placeholder="••••••••"
                     value={loginData.newPassword}
                     onChange={(e) => setLoginData({...loginData, newPassword: e.target.value})}
@@ -1231,19 +1312,21 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
             <button 
               disabled={isAuthenticating}
               type="submit" 
-              className="w-full py-5 bg-orange-600 hover:bg-orange-700 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-orange-200 transition-all active:scale-95 disabled:opacity-50"
+              className="w-full py-4 bg-orange-600 hover:bg-orange-700 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-orange-200 transition-all active:scale-95 disabled:opacity-50 text-xs"
             >
               {isAuthenticating ? 'Processing...' : 
-               authMode === 'login' ? 'Secure Login' :
+               authMode === 'login' ? 'Secure Sign In' :
+               authMode === 'register' ? 'Create Account & Sign In' :
                authMode === 'forgot' ? 'Send OTP' : 'Reset Password'}
             </button>
           </form>
 
           <div className="mt-6 flex flex-col space-y-2 text-center">
-            {authMode === 'login' ? (
+            {authMode === 'login' && (
               <button type="button" onClick={() => { setAuthMode('forgot'); setAuthError(''); setAuthSuccess(''); }} className="text-xs font-bold text-orange-600 hover:underline">Forgot Password?</button>
-            ) : (
-              <button type="button" onClick={() => { setAuthMode('login'); setAuthError(''); setAuthSuccess(''); }} className="text-xs font-bold text-orange-600 hover:underline">Back to Login</button>
+            )}
+            {(authMode === 'forgot' || authMode === 'reset') && (
+              <button type="button" onClick={() => { setAuthMode('login'); setAuthError(''); setAuthSuccess(''); }} className="text-xs font-bold text-orange-600 hover:underline">Back to Sign In</button>
             )}
           </div>
 

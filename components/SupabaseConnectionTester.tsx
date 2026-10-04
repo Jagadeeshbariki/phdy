@@ -41,6 +41,7 @@ const SUPABASE_SCHEMA_SQL = `-- Run this in your Supabase SQL Editor (Dashboard 
 -- 1. Enable PostGIS & UUID extensions
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- 2. PHDY Internal Fund Transactions
 CREATE TABLE IF NOT EXISTS phdy_fund_transactions (
@@ -124,22 +125,49 @@ CREATE TRIGGER trg_sync_landmark_geom
 BEFORE INSERT OR UPDATE ON landmarks
 FOR EACH ROW EXECUTE FUNCTION sync_landmark_geom();
 
--- 6. Enable Public Read Permissions (Row Level Security)
-ALTER TABLE phdy_fund_transactions ENABLE ROW LEVEL SECURITY;
+-- 6. GRANT PERMISSIONS & ROW LEVEL SECURITY (RLS) POLICIES
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
+
+-- Enable RLS and setup public access policies for form submissions and records:
 ALTER TABLE membership_requests ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public Insert membership_requests" ON membership_requests;
+DROP POLICY IF EXISTS "Public Read membership_requests" ON membership_requests;
+DROP POLICY IF EXISTS "Public Update membership_requests" ON membership_requests;
+DROP POLICY IF EXISTS "Public Delete membership_requests" ON membership_requests;
+CREATE POLICY "Public Insert membership_requests" ON membership_requests FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "Public Read membership_requests" ON membership_requests FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "Public Update membership_requests" ON membership_requests FOR UPDATE TO anon, authenticated USING (true);
+CREATE POLICY "Public Delete membership_requests" ON membership_requests FOR DELETE TO anon, authenticated USING (true);
+
+ALTER TABLE phdy_fund_transactions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public Insert phdy_fund_transactions" ON phdy_fund_transactions;
+DROP POLICY IF EXISTS "Public Read phdy_fund_transactions" ON phdy_fund_transactions;
+DROP POLICY IF EXISTS "Public Update phdy_fund_transactions" ON phdy_fund_transactions;
+DROP POLICY IF EXISTS "Public Delete phdy_fund_transactions" ON phdy_fund_transactions;
+CREATE POLICY "Public Insert phdy_fund_transactions" ON phdy_fund_transactions FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "Public Read phdy_fund_transactions" ON phdy_fund_transactions FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "Public Update phdy_fund_transactions" ON phdy_fund_transactions FOR UPDATE TO anon, authenticated USING (true);
+CREATE POLICY "Public Delete phdy_fund_transactions" ON phdy_fund_transactions FOR DELETE TO anon, authenticated USING (true);
+
 ALTER TABLE members_directory ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public Insert members_directory" ON members_directory;
+DROP POLICY IF EXISTS "Public Read members_directory" ON members_directory;
+DROP POLICY IF EXISTS "Public Update members_directory" ON members_directory;
+DROP POLICY IF EXISTS "Public Delete members_directory" ON members_directory;
+CREATE POLICY "Public Insert members_directory" ON members_directory FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "Public Read members_directory" ON members_directory FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "Public Update members_directory" ON members_directory FOR UPDATE TO anon, authenticated USING (true);
+CREATE POLICY "Public Delete members_directory" ON members_directory FOR DELETE TO anon, authenticated USING (true);
+
 ALTER TABLE village_panchayat_accounting ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public Read village_panchayat_accounting" ON village_panchayat_accounting;
+CREATE POLICY "Public Read village_panchayat_accounting" ON village_panchayat_accounting FOR SELECT TO anon, authenticated USING (true);
+
 ALTER TABLE landmarks ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Public Read phdy_fund_transactions" ON phdy_fund_transactions FOR SELECT USING (true);
-CREATE POLICY "Public Insert phdy_fund_transactions" ON phdy_fund_transactions FOR INSERT WITH CHECK (true);
-
-CREATE POLICY "Public Read membership_requests" ON membership_requests FOR SELECT USING (true);
-CREATE POLICY "Public Insert membership_requests" ON membership_requests FOR INSERT WITH CHECK (true);
-
-CREATE POLICY "Public Read members_directory" ON members_directory FOR SELECT USING (true);
-CREATE POLICY "Public Read village_panchayat_accounting" ON village_panchayat_accounting FOR SELECT USING (true);
-CREATE POLICY "Public Read landmarks" ON landmarks FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public Read landmarks" ON landmarks;
+CREATE POLICY "Public Read landmarks" ON landmarks FOR SELECT TO anon, authenticated USING (true);
 `;
 
 export const SupabaseConnectionTester: React.FC<SupabaseConnectionTesterProps> = ({ isOpen, onClose }) => {
