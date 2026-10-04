@@ -198,63 +198,53 @@ export const membershipService = {
     // Insert into `members` table with schema-accurate payload and resilient fallback
     let newMember: any = null;
 
-    const dobValue = req.date_of_birth && String(req.date_of_birth).trim() !== '' ? req.date_of_birth : null;
+    const dobValue = req.date_of_birth && String(req.date_of_birth).trim() !== '' ? String(req.date_of_birth).split('T')[0] : null;
     const userIdValue = req.user_id && String(req.user_id).length > 10 ? req.user_id : null;
-    const adminIdValue = adminUserId && String(adminUserId).length > 10 ? adminUserId : null;
 
     const payload: any = {
       membership_number: membershipNumber,
       full_name: req.profiles?.full_name || req.full_name || 'PHDY Member',
-      photo_url: req.photo_url || null,
-      date_of_birth: dobValue,
       phone: req.phone || null,
       qualification: req.qualification || null,
       reason_to_join: req.reason_to_join || null,
-      joined_at: now,
-      approved_at: now,
       status: 'active',
     };
+
     if (userIdValue) {
       payload.user_id = userIdValue;
     }
-    if (adminIdValue) {
-      payload.approved_by = adminIdValue;
+    if (dobValue) {
+      payload.date_of_birth = dobValue;
+    }
+    if (req.photo_url) {
+      payload.photo_url = req.photo_url;
     }
 
-    try {
-      const res1 = userIdValue
-        ? await supabase.from('members').upsert(payload, { onConflict: 'user_id' }).select().single()
-        : await supabase.from('members').insert([payload]).select().single();
+    const { data: mData, error: mErr } = await supabase
+      .from('members')
+      .insert([payload])
+      .select()
+      .single();
 
-      if (!res1.error && res1.data) {
-        newMember = res1.data;
+    if (mErr) {
+      console.warn('[Membership Approve Error]:', mErr.message);
+      // Fallback minimal insert
+      const { data: mData2, error: mErr2 } = await supabase
+        .from('members')
+        .insert([{
+          membership_number: membershipNumber,
+          full_name: req.profiles?.full_name || req.full_name || 'PHDY Member',
+          status: 'active',
+        }])
+        .select()
+        .single();
+
+      if (mErr2) {
+        throw new Error(`Failed to create official member record: ${mErr2.message}`);
       }
-    } catch (e) {}
-
-    if (!newMember) {
-      try {
-        const res2 = await supabase
-          .from('members')
-          .insert([{
-            membership_number: membershipNumber,
-            full_name: req.profiles?.full_name || req.full_name || 'PHDY Member',
-            phone: req.phone || null,
-            qualification: req.qualification || null,
-            status: 'active',
-            joined_at: now,
-            approved_at: now,
-          }])
-          .select()
-          .single();
-
-        if (!res2.error && res2.data) {
-          newMember = res2.data;
-        }
-      } catch (e) {}
-    }
-
-    if (!newMember) {
-      newMember = { id: req.id, full_name: req.profiles?.full_name || 'PHDY Member', membership_number: membershipNumber };
+      newMember = mData2;
+    } else {
+      newMember = mData;
     }
 
     // Update status in `membership_requests`
