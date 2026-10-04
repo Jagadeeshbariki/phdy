@@ -20,25 +20,29 @@ export const membershipService = {
     const fileExt = file.name.split('.').pop() || 'jpg';
     const filePath = `${userId}/profile_${Date.now()}.${fileExt}`;
 
-    // Try uploading to 'member-photos' bucket
+    // Try uploading to 'member-photos' bucket with graceful try/catch fallback
     const bucketName = 'member-photos';
-    const { error: uploadError } = await supabase.storage
-      .from(bucketName)
-      .upload(filePath, file, {
-        upsert: true,
-        cacheControl: '3600',
-      });
-
-    if (!uploadError) {
-      const { data: { publicUrl } } = supabase.storage
+    try {
+      const { error: uploadError } = await supabase.storage
         .from(bucketName)
-        .getPublicUrl(filePath);
-      return publicUrl;
+        .upload(filePath, file, {
+          upsert: true,
+          cacheControl: '3600',
+        });
+
+      if (!uploadError) {
+        const { data: { publicUrl } } = supabase.storage
+          .from(bucketName)
+          .getPublicUrl(filePath);
+        return publicUrl;
+      }
+
+      console.warn('[Supabase Storage Notice]: Storage upload returned error, using Base64 data fallback:', uploadError.message);
+    } catch (storageException: any) {
+      console.warn('[Supabase Storage Notice]: Storage upload threw exception (Bucket not found or RLS policy), using Base64 data fallback:', storageException?.message || storageException);
     }
 
-    // If upload fails due to RLS policy or missing bucket permissions, fallback to Base64 Data URL
-    console.warn('[Supabase Storage Notice]: Storage upload encountered RLS/bucket error, using Base64 data fallback:', uploadError.message);
-    
+    // Fallback to Base64 Data URL if storage upload failed or threw
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
