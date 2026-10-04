@@ -46,7 +46,7 @@ export const AdminMembershipApplications: React.FC = () => {
           await supabase.auth.signInWithOtp({
             email: userEmail,
             options: {
-              emailRedirectTo: 'https://phdy.vercel.app/#login',
+              emailRedirectTo: 'https://phdy.vercel.app/#set-password',
               data: {
                 full_name: app.profiles?.full_name || 'Member',
                 role: 'phdy_member'

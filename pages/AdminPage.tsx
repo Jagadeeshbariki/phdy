@@ -1081,6 +1081,21 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
             is_active: true
           }]);
 
+          // Also ensure profile in public.profiles is Active with PHDY Member role
+          if (finalEmailLower) {
+            try {
+              await supabase.from('profiles').upsert({
+                email: finalEmailLower,
+                full_name: req.fullName || finalEmailLower.split('@')[0],
+                phone: req.phone || null,
+                status: 'Active',
+                role: 'phdy_member'
+              }, { onConflict: 'email' });
+            } catch (pErr) {
+              console.warn('[Supabase Profiles Update Notice]:', pErr);
+            }
+          }
+
           // Automatically send activation / password setup email to the approved user
           if (finalEmailLower) {
             try {
@@ -1088,7 +1103,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
               const { error: otpError } = await supabase.auth.signInWithOtp({
                 email: finalEmailLower,
                 options: {
-                  emailRedirectTo: getAuthRedirectUrl('#login'),
+                  emailRedirectTo: getAuthRedirectUrl('#set-password'),
                   data: {
                     full_name: req.fullName || 'Member',
                     role: 'phdy_member'
@@ -1098,9 +1113,24 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
 
               if (otpError) {
                 // 2. Fallback to password reset email if OTP signIn is not permitted
-                await supabase.auth.resetPasswordForEmail(finalEmailLower, {
-                  redirectTo: getAuthRedirectUrl('#login')
+                const { error: resetError } = await supabase.auth.resetPasswordForEmail(finalEmailLower, {
+                  redirectTo: getAuthRedirectUrl('#set-password')
                 });
+
+                // 3. Fallback to signUp if user does not exist in auth.users
+                if (resetError) {
+                  await supabase.auth.signUp({
+                    email: finalEmailLower,
+                    password: 'Phdy@' + Math.random().toString(36).substring(2, 8) + '!',
+                    options: {
+                      emailRedirectTo: getAuthRedirectUrl('#set-password'),
+                      data: {
+                        full_name: req.fullName || 'Member',
+                        role: 'phdy_member'
+                      }
+                    }
+                  });
+                }
               }
             } catch (mailErr) {
               console.warn("[Supabase Email Dispatch]:", mailErr);
@@ -2155,16 +2185,25 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                                   )}
 
                                   {currentStatus === 'Approved' && (
-                                    <div className="text-right">
+                                    <div className="flex flex-col items-end gap-1">
                                       <span className="text-xs font-bold text-emerald-700 flex items-center justify-end gap-1">
                                         <CheckCircle2 className="w-3.5 h-3.5" />
-                                        In Users List
+                                        Approved Member
                                       </span>
                                       <button
-                                        onClick={() => setActiveTab('users')}
-                                        className="text-[10px] text-blue-600 hover:underline font-black uppercase tracking-wider mt-1 block"
+                                        onClick={() => {
+                                          setApprovedCredentials({
+                                            name: req.fullName || req.email?.split('@')[0] || 'Member',
+                                            email: req.email || '',
+                                            phone: req.phone || '',
+                                            role: 'PHDY Member',
+                                            password: ''
+                                          });
+                                        }}
+                                        className="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1 mt-0.5"
+                                        title="Open Email & WhatsApp notification modal"
                                       >
-                                        View in Users &rarr;
+                                        <span>✉️ Send / Resend Email</span>
                                       </button>
                                     </div>
                                   )}
@@ -2646,7 +2685,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
             <div className="space-y-2.5">
               {/* Direct Gmail Web 1-Click Send */}
               <a
-                href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(approvedCredentials.email)}&su=${encodeURIComponent('PHDY Membership Application Approved - Welcome to Pedda Harivanam Youth!')}&body=${encodeURIComponent(`Dear ${approvedCredentials.name},\n\nCongratulations! Your PHDY Membership application has been officially APPROVED by the Administrator.\n\nYour account details:\n• Name: ${approvedCredentials.name}\n• Email: ${approvedCredentials.email}\n• Role: Official PHDY Member (Tier 2 Access)\n• Status: Active\n\nYou can now log in to access the PHDY Members Directory and Internal Treasury:\n👉 Official Portal: https://phdy.vercel.app/#login\n\nIf you haven't set up a password yet, simply sign in or reset your password on the portal using this registered email address (${approvedCredentials.email}).\n\nWarm regards,\nPedda Harivanam Development Youth (PHDY)`)}`}
+                href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(approvedCredentials.email)}&su=${encodeURIComponent('PHDY Membership Application Approved - Welcome to Pedda Harivanam Youth!')}&body=${encodeURIComponent(`Dear ${approvedCredentials.name},\n\nCongratulations! Your PHDY Membership application has been officially APPROVED by the Administrator.\n\nYour account details:\n• Name: ${approvedCredentials.name}\n• Email: ${approvedCredentials.email}\n• Role: Official PHDY Member (Tier 2 Access)\n• Status: Active\n\nPlease click the link below to set your password and activate your account:\n👉 Set Password: https://phdy.vercel.app/#set-password?email=${encodeURIComponent(approvedCredentials.email)}\n\nPortal Sign In: https://phdy.vercel.app/#login\n\nWarm regards,\nPedda Harivanam Development Youth (PHDY)`)}`}
                 target="_blank"
                 rel="noreferrer"
                 className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-xs uppercase tracking-wider text-center transition-all flex items-center justify-center gap-1.5 shadow-sm"
@@ -2656,7 +2695,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
 
               {/* Default Mail Client mailto: */}
               <a
-                href={`mailto:${approvedCredentials.email}?subject=${encodeURIComponent('PHDY Membership Application Approved - Welcome to Pedda Harivanam Youth!')}&body=${encodeURIComponent(`Dear ${approvedCredentials.name},\n\nCongratulations! Your PHDY Membership application has been officially APPROVED by the Administrator.\n\nYour account details:\n• Name: ${approvedCredentials.name}\n• Email: ${approvedCredentials.email}\n• Role: Official PHDY Member (Tier 2 Access)\n• Status: Active\n\nYou can now log in to access the PHDY Members Directory and Internal Treasury:\n👉 Official Portal: https://phdy.vercel.app/#login\n\nIf you haven't set up a password yet, simply sign in or reset your password on the portal using this registered email address (${approvedCredentials.email}).\n\nWarm regards,\nPedda Harivanam Development Youth (PHDY)`)}`}
+                href={`mailto:${approvedCredentials.email}?subject=${encodeURIComponent('PHDY Membership Application Approved - Welcome to Pedda Harivanam Youth!')}&body=${encodeURIComponent(`Dear ${approvedCredentials.name},\n\nCongratulations! Your PHDY Membership application has been officially APPROVED by the Administrator.\n\nYour account details:\n• Name: ${approvedCredentials.name}\n• Email: ${approvedCredentials.email}\n• Role: Official PHDY Member (Tier 2 Access)\n• Status: Active\n\nPlease click the link below to set your password and activate your account:\n👉 Set Password: https://phdy.vercel.app/#set-password?email=${encodeURIComponent(approvedCredentials.email)}\n\nPortal Sign In: https://phdy.vercel.app/#login\n\nWarm regards,\nPedda Harivanam Development Youth (PHDY)`)}`}
                 className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs uppercase tracking-wider text-center transition-all flex items-center justify-center gap-1.5 shadow-sm"
               >
                 <span>📧 Open Default Email App</span>
@@ -2665,7 +2704,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
               {/* WhatsApp Notification */}
               {approvedCredentials.phone && (
                 <a
-                  href={`https://api.whatsapp.com/send?phone=91${approvedCredentials.phone.replace(/\D/g, '')}&text=${encodeURIComponent(`Hello ${approvedCredentials.name},\n\nCongratulations! Your PHDY Membership application has been APPROVED by the Administrator.\n\nAn activation email has been sent to ${approvedCredentials.email} to activate your account.\n\nPortal: https://phdy.vercel.app/#login\n\nPedda Harivanam Youth (PHDY)`)}`}
+                  href={`https://api.whatsapp.com/send?phone=91${approvedCredentials.phone.replace(/\D/g, '')}&text=${encodeURIComponent(`Hello ${approvedCredentials.name},\n\nCongratulations! Your PHDY Membership application has been APPROVED by the Administrator.\n\nPlease set your password to activate your account:\n👉 https://phdy.vercel.app/#set-password?email=${encodeURIComponent(approvedCredentials.email)}\n\nPortal: https://phdy.vercel.app/#login\n\nPedda Harivanam Youth (PHDY)`)}`}
                   target="_blank"
                   rel="noreferrer"
                   className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs uppercase tracking-wider text-center transition-all flex items-center justify-center gap-1.5 shadow-sm"
@@ -2678,7 +2717,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
               <button
                 type="button"
                 onClick={() => {
-                  const letter = `Dear ${approvedCredentials.name},\n\nCongratulations! Your PHDY Membership application has been officially APPROVED by the Administrator.\n\nYour account details:\n• Name: ${approvedCredentials.name}\n• Email: ${approvedCredentials.email}\n• Role: Official PHDY Member (Tier 2 Access)\n• Status: Active\n\nYou can now log in to access the PHDY Members Directory and Internal Treasury:\n👉 Official Portal: https://phdy.vercel.app/#login\n\nWarm regards,\nPedda Harivanam Development Youth (PHDY)`;
+                  const letter = `Dear ${approvedCredentials.name},\n\nCongratulations! Your PHDY Membership application has been officially APPROVED by the Administrator.\n\nYour account details:\n• Name: ${approvedCredentials.name}\n• Email: ${approvedCredentials.email}\n• Role: Official PHDY Member (Tier 2 Access)\n• Status: Active\n\nPlease set your password and activate your account:\n👉 https://phdy.vercel.app/#set-password?email=${encodeURIComponent(approvedCredentials.email)}\n\nPortal Sign In: https://phdy.vercel.app/#login\n\nWarm regards,\nPedda Harivanam Development Youth (PHDY)`;
                   navigator.clipboard.writeText(letter);
                   setCopiedCreds(true);
                   setTimeout(() => setCopiedCreds(false), 3000);

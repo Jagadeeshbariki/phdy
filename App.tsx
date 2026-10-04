@@ -11,10 +11,11 @@ import { LoginPage } from './pages/LoginPage';
 import PHDYInternalPage from './pages/PHDYInternalPage';
 import VillageMapPage from './pages/VillageMapPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { SetPasswordPage } from './pages/SetPasswordPage';
 import Footer from './components/Footer';
 import { SupabaseConnectionTester } from './components/SupabaseConnectionTester';
 
-export type Page = 'home' | 'members' | 'ourworks' | 'accounting' | 'contact' | 'login' | 'admin' | 'internal' | 'villagemap' | 'dashboard';
+export type Page = 'home' | 'members' | 'ourworks' | 'accounting' | 'contact' | 'login' | 'admin' | 'internal' | 'villagemap' | 'dashboard' | 'set-password';
 
 export interface LoggedInUser {
   email: string;
@@ -49,9 +50,22 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const handlePopState = () => {
-      const path = window.location.hash.replace('#', '') as Page;
+      const rawHash = window.location.hash;
+      const path = rawHash.replace('#', '').split('?')[0] as Page;
       const session = sessionStorage.getItem('phdy_admin_session');
       const user: LoggedInUser | null = session ? JSON.parse(session) : null;
+
+      // 0. Detect confirmation / password setup / recovery email token from Supabase
+      if (
+        rawHash.includes('type=recovery') || 
+        rawHash.includes('type=invite') || 
+        rawHash.includes('type=signup') || 
+        rawHash.includes('set-password') ||
+        (rawHash.includes('access_token=') && !rawHash.includes('type=magiclink'))
+      ) {
+        setCurrentPage('set-password');
+        return;
+      }
 
       // 1. Tier 3 Protected: Admin only
       if (path === 'admin') {
@@ -80,8 +94,8 @@ const App: React.FC = () => {
         }
       }
 
-      // 4. Public Tiers: Home, Village Map, Contact Us, Login
-      if (['home', 'members', 'ourworks', 'accounting', 'contact', 'login', 'admin', 'internal', 'villagemap', 'dashboard'].includes(path)) {
+      // 4. Public Tiers & Specific Pages
+      if (['home', 'members', 'ourworks', 'accounting', 'contact', 'login', 'admin', 'internal', 'villagemap', 'dashboard', 'set-password'].includes(path)) {
         setCurrentPage(path as Page);
       } else {
         setCurrentPage('home');
@@ -139,6 +153,8 @@ const App: React.FC = () => {
     switch (currentPage) {
       case 'home':
         return <Home onNavigate={navigateTo} loggedInUser={loggedInUser} />;
+      case 'set-password':
+        return <SetPasswordPage onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
       case 'dashboard':
         if (!loggedInUser) {
           return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;

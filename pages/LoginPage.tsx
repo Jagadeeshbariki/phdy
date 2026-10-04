@@ -57,11 +57,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ loggedInUser, onLoginSucce
             email: session.user.email || '',
             role: userRole
           });
-          if (userRole === 'admin') {
-            onNavigate('admin');
-          } else if (userRole === 'phdy_member' || userRole === 'treasurer') {
-            onNavigate('internal');
-          }
+          onNavigate('home');
         }
       });
 
@@ -111,15 +107,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ loggedInUser, onLoginSucce
             if (data?.user) {
               const userRole = data.user.user_metadata?.role || 'user';
               onLoginSuccess({ email: data.user.email || inputEmail, role: userRole });
-              
-              if (userRole === 'admin') {
-                onNavigate('admin');
-              } else if (userRole === 'phdy_member' || userRole === 'treasurer') {
-                onNavigate('internal');
-              } else {
-                setAuthSuccess("Logged in successfully as standard user! Welcome to PHDY.");
-                onNavigate('dashboard');
-              }
+              setAuthSuccess("Logged in successfully! Welcome to PHDY.");
+              onNavigate('home');
               setIsAuthenticating(false);
               return;
             }
@@ -151,9 +140,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ loggedInUser, onLoginSucce
 
           const role = found.role || 'user';
           onLoginSuccess({ email: inputEmail, role });
-          if (role === 'admin') onNavigate('admin');
-          else if (role === 'phdy_member' || role === 'treasurer') onNavigate('internal');
-          else onNavigate('dashboard');
+          setAuthSuccess("Logged in successfully! Welcome to PHDY.");
+          onNavigate('home');
         }
       }
 
