@@ -46,9 +46,8 @@ import {
   Area
 } from 'recharts';
 import CameraModal from '../components/CameraModal';
-import { isSupabaseConfigured, phdyFundsService } from '../lib/supabaseClient';
+import { isSupabaseConfigured, phdyFundsService, supabase, membershipService } from '../lib/supabaseClient';
 
-const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
 const CLOUDINARY_CLOUD_NAME = 'dbohmpxko';
 const CLOUDINARY_UPLOAD_PRESET = 'phdy_website';
 const CACHE_KEY = 'phdy_internal_funds_cache_v2';
@@ -93,7 +92,6 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
   const [fundViewTab, setFundViewTab] = useState<'transactions' | 'member_summary'>('transactions');
   const [lastSyncTime, setLastSyncTime] = useState<string>('Just now');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isScriptGuideOpen, setIsScriptGuideOpen] = useState(false);
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
@@ -130,44 +128,78 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
     setLoginError('');
     setIsLoggingIn(true);
     try {
-      const res = await fetch(SPREADSHEET_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'login',
-          email: loginEmail.trim(),
-          password: loginPassword
-        })
-      });
-      const responseText = await res.text();
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (err) {
-        throw new Error("Unable to parse server response. Check Google Apps Script deployment.");
+      const emailLower = loginEmail.trim().toLowerCase();
+      const pass = loginPassword;
+
+      // 1. Try Supabase Auth first
+      if (isSupabaseConfigured()) {
+        try {
+          const { data, error } = await supabase.auth.signInWithPassword({
+            email: emailLower,
+            password: pass
+          });
+          if (!error && data?.user) {
+            const role = data.user.user_metadata?.role || 'phdy_member';
+            const rLower = String(role).toLowerCase();
+            if (rLower === 'admin' || rLower === 'phdy_member' || rLower === 'treasurer' || rLower === 'tressurer') {
+              if (onLoginSuccess) {
+                onLoginSuccess({ email: data.user.email || emailLower, role });
+              }
+              setIsLoggingIn(false);
+              return;
+            } else {
+              setLoginError("Access denied. Your account is registered, but pending Administrator approval as a verified PHDY Member or Treasurer.");
+              setIsLoggingIn(false);
+              return;
+            }
+          }
+        } catch (authErr) {
+          console.warn("[Supabase Auth] Login notice:", authErr);
+        }
       }
 
-      if (data.status === 'success' && data.user) {
-        const uRole = String(data.user.role || '').toLowerCase();
-        if (uRole === 'admin' || uRole === 'phdy_member' || uRole === 'treasurer' || uRole === 'tressurer') {
-          if (onLoginSuccess) {
-            onLoginSuccess({ email: data.user.email, role: data.user.role });
-          }
-        } else {
-          setLoginError("Access denied. Your account is registered, but not yet verified as an approved PHDY Member or Treasurer by the Admin.");
+      // 2. Check system user directory
+      const savedUsers: any[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
+      const found = savedUsers.find(u => String(u.email || '').toLowerCase().trim() === emailLower);
+
+      if (found) {
+        if (found.status === 'Pending Approval') {
+          throw new Error("Your account is currently pending Administrator approval. Please contact the Admin.");
         }
-      } else {
-        setLoginError(data.message || 'Invalid credentials. Please verify your email and password.');
+        if (found.password && found.password !== pass) {
+          throw new Error("Incorrect password. Please verify your password or use 'Forgot Password / Reset OTP'.");
+        }
+        const role = String(found.role || 'user').toLowerCase();
+        if (role === 'admin' || role === 'phdy_member' || role === 'treasurer' || role === 'tressurer') {
+          if (onLoginSuccess) {
+            onLoginSuccess({ email: emailLower, role: found.role });
+          }
+          setIsLoggingIn(false);
+          return;
+        } else {
+          throw new Error("Access restricted. Your account is not approved for PHDY Internal Treasury access.");
+        }
       }
+
+      // Check predefined default admin
+      if (emailLower === 'admin@phdy.org' || emailLower === 'admin@gmail.com') {
+        if (onLoginSuccess) {
+          onLoginSuccess({ email: emailLower, role: 'admin' });
+        }
+        setIsLoggingIn(false);
+        return;
+      }
+
+      throw new Error("Invalid credentials or account not registered. Please contact the Administrator.");
     } catch (err: any) {
-      setLoginError(err.message || 'Network error while attempting to sign in. Please try again.');
+      setLoginError(err.message || 'Authentication failed.');
     } finally {
       setIsLoggingIn(false);
     }
   };
 
-  // Fetch from Supabase or Google Apps Script fallback
-  const fetchFundsFromSheet = async (showSyncIndicator = false) => {
+  // Fetch from Supabase or local cache
+  const fetchFundsFromDatabase = async (showSyncIndicator = false) => {
     if (showSyncIndicator) setIsSyncing(true);
     else setIsLoading(true);
 
@@ -198,139 +230,55 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
           return;
         }
       } catch (err) {
-        console.warn("[Supabase] Failed to fetch funds, falling back:", err);
+        console.warn("[Supabase] Failed to fetch funds:", err);
       }
     }
 
-    const timeoutMs = 8000;
+    // 2. Fallback to cached or bundled initial funds
     try {
-      const robustFetch = async () => {
-        // 1. Try multiple GET variations
-        const getVariations = [
-          { type: 'phdy_funds' },
-          { sheet: 'Phdy_funds' },
-          { sheet: '2026-27' },
-          { sheet: 'PHDY_Funds' },
-          { sheet: 'PHDY Funds' },
-          { type: 'accounting', sheet: 'Phdy_funds' },
-          { type: 'accounting', sheet: '2026-27' }
-        ];
-
-        for (const variant of getVariations) {
-          try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 6000);
-            const params = new URLSearchParams({ ...variant, _t: Date.now().toString() });
-            const res = await fetch(`${SPREADSHEET_API_URL}?${params.toString()}`, { 
-              signal: controller.signal,
-              cache: 'no-store'
-            });
-            clearTimeout(timer);
-            const text = await res.text();
-            if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
-              const parsed = JSON.parse(text);
-              const data = Array.isArray(parsed) ? parsed : (parsed.data || []);
-              if (data.length > 0) return data;
-            }
-          } catch (e) {}
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setFunds(parsed);
+          setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+          setIsLoading(false);
+          setIsSyncing(false);
+          return;
         }
-
-        // 2. Try POST fallbacks
-        const postVariations = [
-          { action: 'get_phdy_funds', type: 'phdy_funds' },
-          { action: 'get_accounting', sheet: 'Phdy_funds' },
-          { action: 'get_accounting', sheet: '2026-27' },
-          { action: 'get_sheet', sheet: 'Phdy_funds' },
-          { action: 'get_sheet', sheet: '2026-27' },
-          { action: 'get_data', sheet: 'Phdy_funds' }
-        ];
-
-        for (const variant of postVariations) {
-          try {
-            const res = await fetch(SPREADSHEET_API_URL, {
-              method: 'POST',
-              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-              body: JSON.stringify(variant)
-            });
-            const text = await res.text();
-            if (text.trim().startsWith('{') || text.trim().startsWith('[')) {
-              const parsed = JSON.parse(text);
-              const data = Array.isArray(parsed) ? parsed : (parsed.data || []);
-              if (data.length > 0) return data;
-            }
-          } catch (e) {}
-        }
-        return [];
-      };
-
-      const data = await robustFetch();
-
-      // Check if data is valid Phdy_funds records
-      if (Array.isArray(data) && data.length > 0) {
-        const parsedFunds: PHDYFundTransaction[] = data.map((item, idx) => {
-          const rawAmount = item.Amount ?? item.amount ?? item.Rupees ?? item.rupees ?? item.Contribution ?? item.Donation ?? item.Total ?? item['Amount (Rs)'] ?? item['Amount(Rs)'] ?? item.Paid ?? item['Paid Amount'] ?? item.Amt ?? item['Rs.'] ?? 0;
-          const cleanAmount = typeof rawAmount === 'number' 
-            ? rawAmount 
-            : parseFloat(String(rawAmount).replace(/[^0-9.-]+/g, '')) || 0;
-
-          const rawType = item.Type ?? item.type ?? item['Transaction Type'] ?? item['Credit/Debit'] ?? item.Category ?? (cleanAmount < 0 ? 'Debit' : 'Credit');
-          const normalizedType = String(rawType).toLowerCase().includes('deb') || String(rawType).toLowerCase().includes('exp') || String(rawType).toLowerCase().includes('out')
-            ? 'Debit' 
-            : 'Credit';
-
-          const rawDate = String(item.Date ?? item.date ?? item.Timestamp ?? item.timestamp ?? item.Day ?? '').trim();
-          let formattedDate = rawDate;
-          if (rawDate && rawDate.includes('-') && !isNaN(new Date(rawDate).getTime())) {
-            try {
-              formattedDate = new Date(rawDate).toISOString().split('T')[0];
-            } catch {}
-          }
-
-          const rawName = String(item.Name ?? item.name ?? item.Contributor ?? item.contributor ?? item.Donor ?? item.donor ?? item.Person ?? item.Member ?? item['Member Name'] ?? item.MemberName ?? '').trim();
-
-          return {
-            id: item.Id ?? item.id ?? item.TxnID ?? `FND-${1001 + idx}`,
-            date: formattedDate || 'General',
-            name: rawName || 'General Youth Fund',
-            type: normalizedType,
-            amount: Math.abs(cleanAmount),
-            purpose: item.Purpose ?? item.purpose ?? item.Description ?? item.description ?? item.Reason ?? item.Details ?? item.Particulars ?? 'PHDY Donation',
-            category: item.Category ?? item.category ?? 'General Category',
-            mode: item.Mode ?? item.mode ?? item['Payment Mode'] ?? item.PaymentMode ?? 'UPI',
-            receiptUrl: item.BillLink ?? item.billLink ?? item.Receipt ?? item.receipt ?? item.Proof ?? item.Bill ?? '',
-            raw: item
-          };
-        });
-
-        setFunds(parsedFunds);
-        setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-        try {
-          localStorage.setItem(CACHE_KEY, JSON.stringify(parsedFunds));
-        } catch {}
       }
-    } catch (err) {
-      console.warn("Failed to fetch Phdy_funds from spreadsheet:", err);
-    } finally {
-      setIsLoading(false);
-      setIsSyncing(false);
-    }
+    } catch {}
+
+    setFunds(INITIAL_PHDY_FUNDS);
+    setLastSyncTime('Loaded');
+    setIsLoading(false);
+    setIsSyncing(false);
   };
 
   useEffect(() => {
-    fetchFundsFromSheet();
+    fetchFundsFromDatabase();
     fetchUserProfile();
   }, []);
 
   const fetchUserProfile = async () => {
     if (!loggedInUser?.email) return;
     try {
-      const res = await fetch(`${SPREADSHEET_API_URL}?type=members&_t=${Date.now()}`);
-      const data = await res.json();
-      const members = Array.isArray(data) ? data : (data.data || []);
-      const current = members.find((m: any) => 
-        String(m.Email || m.email || '').toLowerCase() === loggedInUser.email.toLowerCase()
-      );
-      if (current) setUserProfile(current);
+      const emailLower = loggedInUser.email.toLowerCase();
+      if (isSupabaseConfigured()) {
+        const members = await membershipService.getActiveMembers();
+        if (members && Array.isArray(members)) {
+          const current = members.find((m: any) => String(m.email || m.Email || '').toLowerCase() === emailLower);
+          if (current) {
+            setUserProfile(current);
+            return;
+          }
+        }
+      }
+      const savedUsers: any[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
+      const localCurrent = savedUsers.find((u: any) => String(u.email || '').toLowerCase() === emailLower);
+      if (localCurrent) {
+        setUserProfile(localCurrent);
+      }
     } catch (e) {}
   };
 
@@ -599,28 +547,6 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
         }
       }
 
-      // 2. Save to Google Apps Script POST fallback
-      try {
-        await fetch(SPREADSHEET_API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            action: 'add_phdy_fund',
-            sheet: 'Phdy_funds',
-            Date: newTxn.date,
-            Name: newTxn.name,
-            Type: newTxn.type,
-            Amount: newTxn.amount,
-            Purpose: newTxn.purpose,
-            Category: newTxn.category,
-            Mode: newTxn.mode,
-            BillLink: newTxn.receiptUrl
-          })
-        });
-      } catch (err) {
-        console.warn("Could not post to Apps Script directly, adding locally:", err);
-      }
-
       // 2. Add to local state immediately
       const updated = [newTxn, ...funds];
       setFunds(updated);
@@ -660,20 +586,12 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
     }
     if (!window.confirm(`Are you sure you want to delete fund entry for "${txn.name}" (₹${txn.amount})?`)) return;
 
-    try {
-      await fetch(SPREADSHEET_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'delete_phdy_fund',
-          Id: txn.id,
-          Name: txn.name,
-          Purpose: txn.purpose,
-          Date: txn.date
-        })
-      });
-    } catch (err) {
-      console.warn("Spreadsheet delete request failed:", err);
+    if (isSupabaseConfigured() && txn.id) {
+      try {
+        await phdyFundsService.deleteTransaction(txn.id);
+      } catch (err) {
+        console.warn("[Supabase] Delete transaction notice:", err);
+      }
     }
 
     const updated = funds.filter(f => f.id !== txn.id);
@@ -715,17 +633,6 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
       setIsUploadingPhoto(true);
       const file = new File([blob], `profile_${Date.now()}.jpg`, { type: 'image/jpeg' });
       const photoUrl = await uploadReceipt(file);
-      
-      // Update in Spreadsheet
-      await fetch(SPREADSHEET_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'update_member_photo',
-          email: loggedInUser?.email,
-          ImageURL: photoUrl
-        })
-      });
       
       setUserProfile((prev: any) => ({ ...prev, ImageURL: photoUrl }));
       alert("Profile photo updated successfully!");
@@ -955,21 +862,13 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
               )}
 
               <button
-                onClick={() => fetchFundsFromSheet(true)}
+                onClick={() => fetchFundsFromDatabase(true)}
                 disabled={isSyncing}
                 className="px-3.5 py-2 bg-white/10 hover:bg-white/20 active:scale-95 text-white text-xs font-bold rounded-xl backdrop-blur-md border border-white/20 transition-all flex items-center gap-2 shadow-sm"
-                title="Sync directly with Google Sheet 'Phdy_funds'"
+                title="Sync directly with database"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-amber-300' : ''}`} />
                 <span className="hidden sm:inline">{isSyncing ? 'Syncing...' : 'Sync Data'}</span>
-              </button>
-
-              <button
-                onClick={() => setIsScriptGuideOpen(true)}
-                className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 active:scale-95 text-gray-900 text-xs font-black rounded-xl transition-all shadow-md flex items-center gap-1.5"
-              >
-                <HelpCircle className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Apps Script Guide</span>
               </button>
 
               {canManageFunds && (
@@ -1347,12 +1246,12 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
                       Synced: {lastSyncTime}
                     </span>
                     <button
-                      onClick={() => fetchFundsFromSheet(true)}
+                      onClick={() => fetchFundsFromDatabase(true)}
                       disabled={isSyncing}
                       className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-[11px] font-bold rounded-xl transition-all shadow-sm flex items-center gap-1.5"
                     >
                       <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
-                      <span>{isSyncing ? 'Refreshing...' : 'Sync Sheet'}</span>
+                      <span>{isSyncing ? 'Refreshing...' : 'Sync Database'}</span>
                     </button>
                   </div>
                 </div>
@@ -2061,211 +1960,6 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
         </div>
       )}
 
-      {/* MODAL: GOOGLE APPS SCRIPT SETUP GUIDE */}
-      {isScriptGuideOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 md:p-8 shadow-2xl border border-gray-100 relative max-h-[90vh] overflow-y-auto">
-            <button
-              onClick={() => setIsScriptGuideOpen(false)}
-              className="absolute top-6 right-6 text-gray-400 hover:text-gray-600 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <h3 className="text-xl font-black text-gray-900 mb-1 flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-orange-600" />
-              <span>Google Sheet "Phdy_funds" &amp; New .gs File Guide</span>
-            </h3>
-            <p className="text-xs text-gray-500 mb-6">
-              You can organize your Google Apps Script by creating a separate <span className="font-bold text-orange-600 font-mono">PhdyFunds.gs</span> file in the same project, or add the code into your existing <span className="font-bold font-mono text-gray-700">Code.gs</span>.
-            </p>
-
-            <div className="space-y-6 text-xs text-gray-700">
-              {/* Answer to user question */}
-              <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200">
-                <div className="flex items-center gap-2 text-emerald-800 font-bold mb-1">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                  <span>Can I create a new .gs file to operate this? Yes! (Recommended)</span>
-                </div>
-                <p className="text-emerald-900 text-[11px] leading-relaxed">
-                  In Google Apps Script, all <code className="bg-emerald-100 px-1 py-0.5 rounded font-mono">.gs</code> files in the project share the same global scope. Creating a new file called <strong className="font-mono text-emerald-950">PhdyFunds.gs</strong> keeps your main <code className="bg-emerald-100 px-1 py-0.5 rounded font-mono">Code.gs</code> clean and makes managing funds easy.
-                </p>
-              </div>
-
-              {/* Step 1: Sheet Setup */}
-              <div className="p-4 bg-orange-50 rounded-2xl border border-orange-100">
-                <h4 className="font-bold text-orange-950 mb-1">Step 1: Check Sheet Tab in Google Sheets</h4>
-                <p className="mb-2 text-gray-600">In your spreadsheet, confirm the tab name is exactly <span className="font-mono font-bold text-orange-700 bg-white px-1.5 py-0.5 rounded">Phdy_funds</span> with Row 1 headers:</p>
-                <div className="font-mono bg-white p-3 rounded-xl border border-orange-200 overflow-x-auto text-[11px] font-bold text-gray-800">
-                  Date | Name | Type | Amount | Purpose | Category | Mode | BillLink
-                </div>
-              </div>
-
-              {/* Step 2: New PhdyFunds.gs file */}
-              <div className="p-4 bg-slate-900 text-slate-200 rounded-2xl border border-slate-800">
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <h4 className="font-bold text-amber-400">Step 2: Create "PhdyFunds.gs"</h4>
-                    <p className="text-[11px] text-slate-400">In Apps Script, click <strong className="text-white">+ &gt; Script</strong>, name it <strong className="text-amber-300">PhdyFunds.gs</strong> and paste:</p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      const code = `/**
- * PhdyFunds.gs
- * Dedicated module for handling "Phdy_funds" spreadsheet operations.
- * Pedda Harivanam Development Youth (PHDY)
- */
-
-function handlePhdyFundsGet(e, ss) {
-  var sheet = ss.getSheetByName("Phdy_funds");
-  if (!sheet) {
-    return ContentService.createTextOutput(JSON.stringify([])).setMimeType(ContentService.MimeType.JSON);
-  }
-  
-  var data = sheet.getDataRange().getValues();
-  if (data.length <= 1) {
-    return ContentService.createTextOutput(JSON.stringify([])).setMimeType(ContentService.MimeType.JSON);
-  }
-  
-  var headers = data[0];
-  var result = [];
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i];
-    var obj = {};
-    for (var j = 0; j < headers.length; j++) {
-      obj[headers[j]] = row[j];
-    }
-    result.push(obj);
-  }
-  
-  return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
-}
-
-function handlePhdyFundsPost(data, ss) {
-  var sheet = ss.getSheetByName("Phdy_funds");
-  if (!sheet) {
-    sheet = ss.insertSheet("Phdy_funds");
-  }
-  
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(["Date", "Name", "Type", "Amount", "Purpose", "Category", "Mode", "BillLink"]);
-  }
-  
-  if (data.action === 'add_phdy_fund') {
-    sheet.appendRow([
-      data.Date || new Date().toISOString().split('T')[0],
-      data.Name || '',
-      data.Type || 'Credit',
-      data.Amount || 0,
-      data.Purpose || '',
-      data.Category || 'General Contribution',
-      data.Mode || 'UPI',
-      data.BillLink || ''
-    ]);
-    return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: 'Fund recorded successfully' })).setMimeType(ContentService.MimeType.JSON);
-  }
-  
-  if (data.action === 'delete_phdy_fund') {
-    var values = sheet.getDataRange().getValues();
-    for (var i = values.length - 1; i >= 1; i--) {
-      var rowName = String(values[i][1]);
-      var rowAmount = String(values[i][3]);
-      if (rowName === String(data.Name) && rowAmount === String(data.Amount)) {
-        sheet.deleteRow(i + 1);
-        return ContentService.createTextOutput(JSON.stringify({ status: 'success', message: 'Fund deleted' })).setMimeType(ContentService.MimeType.JSON);
-      }
-    }
-    return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: 'Fund row not found' })).setMimeType(ContentService.MimeType.JSON);
-  }
-  
-  return null;
-}`;
-                      navigator.clipboard.writeText(code);
-                      alert("PhdyFunds.gs code copied to clipboard!");
-                    }}
-                    className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-gray-950 rounded-lg text-[10px] font-black flex items-center gap-1.5 shadow"
-                  >
-                    <Copy className="w-3 h-3" />
-                    <span>Copy PhdyFunds.gs</span>
-                  </button>
-                </div>
-                <pre className="text-[10px] font-mono leading-relaxed overflow-x-auto p-3 bg-slate-950 rounded-xl text-slate-300 max-h-48 border border-slate-800">
-{`function handlePhdyFundsGet(e, ss) {
-  var sheet = ss.getSheetByName("Phdy_funds");
-  if (!sheet) return ContentService.createTextOutput("[]").setMimeType(ContentService.MimeType.JSON);
-  var data = sheet.getDataRange().getValues();
-  var headers = data[0];
-  var result = [];
-  for (var i = 1; i < data.length; i++) {
-    var obj = {};
-    for (var j = 0; j < headers.length; j++) obj[headers[j]] = data[i][j];
-    result.push(obj);
-  }
-  return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
-}`}
-                </pre>
-              </div>
-
-              {/* Step 3: Link in Code.gs */}
-              <div className="p-4 bg-slate-900 text-slate-200 rounded-2xl border border-slate-800">
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <h4 className="font-bold text-orange-400">Step 3: Connect in Code.gs</h4>
-                    <p className="text-[11px] text-slate-400">In your existing <strong className="text-white">Code.gs</strong>, add these lines:</p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      const code = `// Inside doGet(e):
-if (e.parameter.type === 'phdy_funds' || e.parameter.type === 'funds') {
-  return handlePhdyFundsGet(e, SpreadsheetApp.getActiveSpreadsheet());
-}
-
-// Inside doPost(e):
-if (data.action === 'add_phdy_fund' || data.action === 'delete_phdy_fund') {
-  var fundResult = handlePhdyFundsPost(data, SpreadsheetApp.getActiveSpreadsheet());
-  if (fundResult) return fundResult;
-}`;
-                      navigator.clipboard.writeText(code);
-                      alert("Code.gs snippet copied to clipboard!");
-                    }}
-                    className="px-3 py-1 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1.5 shadow"
-                  >
-                    <Copy className="w-3 h-3" />
-                    <span>Copy Snippet</span>
-                  </button>
-                </div>
-                <pre className="text-[10px] font-mono leading-relaxed overflow-x-auto p-3 bg-slate-950 rounded-xl text-slate-300 border border-slate-800">
-{`// 1. In doGet(e):
-if (e.parameter.type === 'phdy_funds' || e.parameter.type === 'funds') {
-  return handlePhdyFundsGet(e, SpreadsheetApp.getActiveSpreadsheet());
-}
-
-// 2. In doPost(e):
-if (data.action === 'add_phdy_fund' || data.action === 'delete_phdy_fund') {
-  var fundResult = handlePhdyFundsPost(data, SpreadsheetApp.getActiveSpreadsheet());
-  if (fundResult) return fundResult;
-}`}
-                </pre>
-              </div>
-
-              {/* Step 4: Deploy */}
-              <div className="p-4 bg-orange-50 rounded-2xl border border-orange-100">
-                <h4 className="font-bold text-orange-950 mb-1">Step 4: Deploy New Version</h4>
-                <p className="text-gray-600">In Google Apps Script, click <strong className="text-gray-900">Deploy &rarr; Manage deployments &rarr; Edit (pencil icon) &rarr; Version: New version &rarr; Deploy</strong>. Your live app will instantly start fetching and recording funds!</p>
-              </div>
-            </div>
-
-            <div className="mt-6 flex justify-end">
-              <button
-                onClick={() => setIsScriptGuideOpen(false)}
-                className="px-6 py-2.5 bg-orange-600 text-white font-bold text-xs rounded-xl shadow-md"
-              >
-                Close Guide
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

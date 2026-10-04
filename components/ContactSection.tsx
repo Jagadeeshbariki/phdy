@@ -3,7 +3,6 @@ import React, { useState, useRef } from 'react';
 import { CONTACT_SOCIAL_LINKS } from '../ContactData';
 import { isSupabaseConfigured, membershipService } from '../lib/supabaseClient';
 
-const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
 const CLOUDINARY_CLOUD_NAME = 'dbohmpxko';
 const CLOUDINARY_UPLOAD_PRESET = 'phdy_preset'; 
 
@@ -61,41 +60,34 @@ const ContactSection: React.FC = () => {
     
     setIsSubmitting(true);
     try {
-      const cloudinaryData = await uploadToCloudinary(selectedFile);
-      
-      const submissionPayload = {
-        action: 'add_join_request',
-        type: 'join_requests',
-        sheet: 'JoinRequests',
-        sheetName: 'JoinRequests',
-        fullName: formData.fullName.trim(),
-        FullName: formData.fullName.trim(),
-        "Full Name": formData.fullName.trim(),
-        name: formData.fullName.trim(),
-        Name: formData.fullName.trim(),
-        email: formData.email.trim(),
-        Email: formData.email.trim(),
-        phone: formData.phone.trim(),
-        Phone: formData.phone.trim(),
-        dob: formData.dob,
-        DOB: formData.dob,
-        address: formData.address.trim(),
-        Address: formData.address.trim(),
-        reason: formData.reason.trim(),
-        Reason: formData.reason.trim(),
-        photoUrl: cloudinaryData.secure_url,
-        PhotoUrl: cloudinaryData.secure_url,
-        "Photo URL": cloudinaryData.secure_url,
-        status: 'In Progress',
-        Status: 'In Progress',
-        "Request Status": 'In Progress',
-        "RequestStatus": 'In Progress',
-        date: new Date().toISOString().split('T')[0],
-        Date: new Date().toISOString().split('T')[0],
-        timestamp: new Date().toISOString(),
-        Timestamp: new Date().toISOString()
-      };
+      let photoUrl = '';
+      if (selectedFile) {
+        try {
+          const cloudinaryData = await uploadToCloudinary(selectedFile);
+          photoUrl = cloudinaryData?.secure_url || '';
+        } catch (e) {
+          console.warn("Cloudinary upload fallback:", e);
+        }
+      }
 
+      // 1. Submit to Supabase
+      if (isSupabaseConfigured()) {
+        try {
+          await membershipService.submitJoinRequest({
+            fullName: formData.fullName.trim(),
+            phone: formData.phone.trim(),
+            email: formData.email.trim(),
+            dob: formData.dob,
+            address: formData.address.trim(),
+            motivation: formData.reason.trim(),
+            photoFile: selectedFile
+          });
+        } catch (supabaseErr: any) {
+          console.warn("[Supabase] Join request submission error:", supabaseErr.message);
+        }
+      }
+
+      // 2. Save to local cache for instant UI feedback
       try {
         const localReq = {
           fullName: formData.fullName.trim(),
@@ -104,7 +96,7 @@ const ContactSection: React.FC = () => {
           dob: formData.dob,
           address: formData.address.trim(),
           reason: formData.reason.trim(),
-          photoUrl: cloudinaryData.secure_url,
+          photoUrl: photoUrl || previewUrl,
           status: 'In Progress',
           date: new Date().toISOString().split('T')[0]
         };
@@ -119,32 +111,8 @@ const ContactSection: React.FC = () => {
         });
         filtered.unshift(localReq);
         localStorage.setItem('phdy_join_requests_cache', JSON.stringify(filtered));
-        // Notify any active admin page
         window.dispatchEvent(new Event('phdy_join_requests_updated'));
       } catch (e) {}
-
-      // Submit to Supabase if configured
-      if (isSupabaseConfigured()) {
-        try {
-          await membershipService.submitJoinRequest({
-            fullName: formData.fullName.trim(),
-            phone: formData.phone.trim(),
-            email: formData.email.trim(),
-            dob: formData.dob,
-            address: formData.address.trim(),
-            motivation: formData.reason.trim(),
-            photoFile: selectedFile
-          });
-        } catch (supabaseErr: any) {
-          console.warn("[Supabase] Join request submission notice:", supabaseErr.message);
-        }
-      }
-
-      await fetch(SPREADSHEET_API_URL, {
-        method: 'POST', 
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(submissionPayload),
-      });
 
       setIsSubmitting(false);
       setSubmitted(true);

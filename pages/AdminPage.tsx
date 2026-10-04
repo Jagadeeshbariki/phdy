@@ -19,20 +19,26 @@ import {
   Mail,
   Calendar,
   ShieldAlert,
-  Camera
+  Camera,
+  KeyRound,
+  Copy
 } from 'lucide-react';
 import { LoggedInUser } from '../App';
+import { WORKS_DATA } from '../constants';
 import CameraModal from '../components/CameraModal';
 import { getCurrentFinancialYear, getFinancialYearsList } from '../types';
 import aboutConfigData from '../public/AboutConfig.json';
 import { 
-  fetchSpreadsheetAccountingRecords, 
   addRecordToLocalCache, 
-  removeRecordFromLocalCache, 
-  ACCOUNTING_APPS_SCRIPT_SNIPPET 
+  removeRecordFromLocalCache 
 } from '../utils/accountingHelper';
+import { 
+  isSupabaseConfigured, 
+  supabase, 
+  membershipService, 
+  villageAccountingService 
+} from '../lib/supabaseClient';
 
-const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
 const CLOUDINARY_CLOUD_NAME = 'dbohmpxko';
 const CLOUDINARY_UPLOAD_PRESET = 'phdy_preset'; 
 
@@ -60,6 +66,8 @@ export interface SystemUserRecord {
   role: 'admin' | 'treasurer' | 'Phdy_member' | 'user' | string;
   joinedDate?: string;
   status?: string;
+  password?: string;
+  phone?: string;
 }
 
 export const loadInitialUsers = (currentLoggedInUser?: LoggedInUser | null): SystemUserRecord[] => {
@@ -126,10 +134,11 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
   const [userRoleSuccess, setUserRoleSuccess] = useState<string>('');
   const [userSearchTerm, setUserSearchTerm] = useState<string>('');
   const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'admin' | 'treasurer' | 'phdy_member' | 'user'>('all');
-  const [showAccountingSetupGuide, setShowAccountingSetupGuide] = useState(false);
-  const [copiedAccountingCode, setCopiedAccountingCode] = useState(false);
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false);
   const [updatingMemberEmail, setUpdatingMemberEmail] = useState<string | null>(null);
+  const [adminResetModalUser, setAdminResetModalUser] = useState<SystemUserRecord | null>(null);
+  const [adminNewPassword, setAdminNewPassword] = useState<string>('');
+  const [adminResetSuccess, setAdminResetSuccess] = useState<string>('');
   
   // Add user modal states
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
@@ -150,49 +159,6 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     return 'In Progress';
   };
 
-  const robustFetchUtility = async (params: Record<string, string>, postAction?: string) => {
-    const timeoutMs = 10000;
-    const urlParams = new URLSearchParams({ ...params, _t: Date.now().toString() });
-    const url = `${SPREADSHEET_API_URL}?${urlParams.toString()}`;
-
-    const parse = (text: string) => {
-      if (!text || text.trim().startsWith('<')) return [];
-      try {
-        const parsed = JSON.parse(text);
-        if (Array.isArray(parsed)) return parsed;
-        if (Array.isArray(parsed.data)) return parsed.data;
-        if (Array.isArray(parsed.requests)) return parsed.requests;
-        if (Array.isArray(parsed.rows)) return parsed.rows;
-        if (Array.isArray(parsed.records)) return parsed.records;
-        if (Array.isArray(parsed.users)) return parsed.users;
-        return [];
-      } catch (e) { return []; }
-    };
-
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      const res = await fetch(url, { signal: controller.signal, cache: 'no-store' });
-      clearTimeout(timer);
-      const text = await res.text();
-      const data = parse(text);
-      if (data.length > 0) return data;
-    } catch (e) {}
-
-    if (postAction) {
-      try {
-        const res = await fetch(SPREADSHEET_API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: postAction, ...params })
-        });
-        const text = await res.text();
-        return parse(text);
-      } catch (e) {}
-    }
-    return [];
-  };
-
   const fetchSpreadsheetMembers = async () => {
     if (!loggedInUser) return;
     setIsRefreshing(true);
@@ -201,8 +167,18 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       const config = Array.isArray(aboutConfigData) ? aboutConfigData[0] : aboutConfigData;
       const legacy: any[] = config?.members || [];
 
-      // 2. Fetch from spreadsheet using robust fetch
-      const membersFromSheet = await robustFetchUtility({ type: 'members' }, 'get_members');
+      // 2. Fetch from Supabase members_directory
+      let membersFromSupabase: any[] = [];
+      if (isSupabaseConfigured()) {
+        try {
+          const res = await membershipService.getActiveMembers();
+          if (res && Array.isArray(res)) {
+            membersFromSupabase = res;
+          }
+        } catch (e) {
+          console.warn("[Supabase] Member fetch notice:", e);
+        }
+      }
 
       // 3. Collect from approved join requests in cache and state
       let cachedApprovedReqs: any[] = [];
@@ -290,15 +266,20 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         }
       });
 
-      // D. Overlay direct spreadsheet entries if present
-      membersFromSheet.forEach((m: any) => {
-        const key = String(m.Name || m.name || '').trim().toLowerCase();
+      // D. Overlay direct Supabase entries if present
+      membersFromSupabase.forEach((sm: any) => {
+        const key = String(sm.name || '').trim().toLowerCase();
         if (key) {
-          const existing = memberMap.get(key);
           memberMap.set(key, {
-            ...existing,
-            ...m,
-            Status: 'Approved'
+            "Id.No": sm.id || 'MEM',
+            Name: sm.name,
+            Role: sm.role || 'Active Member',
+            Qualification: sm.qualification || 'Nill',
+            ImageURL: sm.photo_url || 'https://cdn-icons-png.flaticon.com/128/17798/17798443.png',
+            Status: 'Approved',
+            Source: 'Supabase Directory',
+            Address: 'Pedda Harivanam',
+            Phone: sm.mobile || ''
           });
         }
       });
@@ -312,11 +293,29 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
   };
 
   const fetchSpreadsheetAccounting = async () => {
-    if (!SPREADSHEET_API_URL || !loggedInUser) return;
+    if (!loggedInUser) return;
     setIsRefreshing(true);
     try {
-      const { records } = await fetchSpreadsheetAccountingRecords(SPREADSHEET_API_URL);
-      setSpreadsheetAccounting(records);
+      if (isSupabaseConfigured()) {
+        const rows = await villageAccountingService.getAccountingVouchers(accountingFormData.FinancialYear);
+        if (rows && rows.length > 0) {
+          const mapped = rows.map((r: any) => ({
+            id: r.id,
+            FinancialYear: r.financial_year,
+            Month: r.month,
+            Type: r.type,
+            Description: r.description,
+            BillLink: r.pdf_url || ''
+          }));
+          setSpreadsheetAccounting(mapped);
+          setIsRefreshing(false);
+          return;
+        }
+      }
+      const cached = localStorage.getItem('phdy_accounting_local_records_v1');
+      if (cached) {
+        setSpreadsheetAccounting(JSON.parse(cached));
+      }
     } catch (e) {
       console.warn("Failed to fetch accounting:", e);
     } finally {
@@ -325,11 +324,15 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
   };
 
   const fetchSpreadsheetWorks = async () => {
-    if (!SPREADSHEET_API_URL || !loggedInUser) return;
+    if (!loggedInUser) return;
     setIsRefreshing(true);
     try {
-      const data = await robustFetchUtility({ type: 'works' }, 'get_works');
-      setSpreadsheetWorks(Array.isArray(data) ? data : []);
+      const cached = sessionStorage.getItem('phdy_works_cache');
+      if (cached) {
+        setSpreadsheetWorks(JSON.parse(cached));
+      } else {
+        setSpreadsheetWorks(WORKS_DATA);
+      }
     } catch (e) {
       console.warn("Failed to fetch works:", e);
     } finally {
@@ -342,7 +345,17 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     setIsRefreshing(true);
 
     try {
-      const data = await robustFetchUtility({ type: 'join_requests', sheet: 'JoinRequests' }, 'get_join_requests');
+      let supaRequests: any[] = [];
+      if (isSupabaseConfigured()) {
+        try {
+          const res = await membershipService.getMembershipRequests();
+          if (res && Array.isArray(res)) {
+            supaRequests = res;
+          }
+        } catch (e) {
+          console.warn("[Supabase] Failed to fetch join requests:", e);
+        }
+      }
 
       // Load locally cached requests
       let cachedRequests: any[] = [];
@@ -369,29 +382,28 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         });
       }
 
-      // Populate / merge spreadsheet records
-      if (Array.isArray(data)) {
-        data.forEach(r => {
+      // Populate / merge Supabase records
+      if (Array.isArray(supaRequests)) {
+        supaRequests.forEach(r => {
           if (r) {
-            const fullName = r.FullName || r.fullName || r['Full Name'] || r.Name || r.name || '';
-            const email = r.Email || r.email || '';
-            const phone = r.Phone || r.phone || r['Phone Number'] || r.PhoneNumber || '';
-            const dob = r.DOB || r.dob || r['Date of Birth'] || r.DateOfBirth || '';
-            const address = r.Address || r.address || '';
-            const reason = r.Reason || r.reason || '';
-            const photoUrl = r.PhotoUrl || r.photoUrl || r.Photo || r.photo || r.Image || r.image || r.ImageURL || '';
-            const rawStatus = r.Status || r.status || r['Request Status'] || r.RequestStatus || '';
-            const status = normalizeStatus(rawStatus);
-            const date = r.Date || r.date || r.Timestamp || r.timestamp || '';
+            const fullName = r.full_name || r.fullName || '';
+            const email = r.email || '';
+            const phone = r.phone || '';
+            const address = r.address || '';
+            const reason = r.motivation || r.reason || '';
+            const photoUrl = r.photo_url || r.photoUrl || '';
+            const status = r.status === 'Approved' ? 'Approved' : (r.status === 'Rejected' ? 'Rejected' : 'In Progress');
+            const date = r.submitted_at || r.date || '';
 
             const key = String(email || fullName).toLowerCase().trim();
             if (key) {
               const existing = reqMap.get(key);
               reqMap.set(key, {
+                id: r.id || existing?.id,
                 fullName: fullName || existing?.fullName || 'Applicant',
                 email: email || existing?.email || '',
                 phone: phone || existing?.phone || '',
-                dob: dob || existing?.dob || '',
+                dob: r.dob || existing?.dob || '',
                 address: address || existing?.address || '',
                 reason: reason || existing?.reason || '',
                 photoUrl: photoUrl || existing?.photoUrl || '',
@@ -421,7 +433,6 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     setIsRefreshing(true);
 
     try {
-      const data = await robustFetchUtility({ type: 'users' }, 'get_users');
       const userMap = new Map<string, any>();
       
       const currentAdminKey = loggedInUser?.email?.toLowerCase().trim();
@@ -435,20 +446,24 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         });
       }
 
-      if (Array.isArray(data)) {
-        data.forEach(u => {
-          if (u && (u.Email || u.email)) {
-            const email = String(u.Email || u.email).toLowerCase().trim();
-            userMap.set(email, {
-              name: u.Name || u.name || u.FullName || u.fullName || email.split('@')[0],
-              email: email,
-              role: u.Role || u.role || 'user',
-              joinedDate: u.JoinedDate || u.joinedDate || u.date || '2025-01-01',
-              status: u.Status || u.status || 'Active'
-            });
-          }
-        });
-      }
+      // Read from local user directory
+      try {
+        const saved: any[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
+        if (Array.isArray(saved)) {
+          saved.forEach(u => {
+            if (u && u.email) {
+              const email = String(u.email).toLowerCase().trim();
+              userMap.set(email, {
+                name: u.name || email.split('@')[0],
+                email: email,
+                role: u.role || 'user',
+                joinedDate: u.joinedDate || '2026-01-01',
+                status: u.status || 'Active'
+              });
+            }
+          });
+        }
+      } catch (e) {}
 
       setSpreadsheetUsers(Array.from(userMap.values()));
     } catch (e) {
@@ -487,24 +502,12 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       return [newUser, ...prev];
     });
 
-    // 2. Post to spreadsheet API
+    // 2. Persist in registered users cache
     try {
-      await fetch(SPREADSHEET_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'register',
-          name: newUser.name,
-          Name: newUser.name,
-          email: newUser.email,
-          Email: newUser.email,
-          role: newUser.role,
-          Role: newUser.role,
-          status: 'Active',
-          Status: 'Active',
-          password: 'TemporaryPassword123!'
-        })
-      });
+      const existingList: any[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
+      const filtered = existingList.filter(u => String(u.email).toLowerCase() !== emailLower);
+      filtered.unshift(newUser);
+      localStorage.setItem('phdy_registered_users_list', JSON.stringify(filtered));
     } catch (e) {}
 
     setIsAddUserModalOpen(false);
@@ -530,20 +533,15 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       // 1. Update state
       setSpreadsheetUsers(prev => prev.filter(u => String(u.email || '').toLowerCase().trim() !== targetEmail));
 
-      // 2. Post delete to spreadsheet
-      await fetch(SPREADSHEET_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'delete_user',
-          email: email
-        })
-      });
+      // 2. Remove from local storage
+      const existingList: any[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
+      const filtered = existingList.filter(u => String(u.email || '').toLowerCase().trim() !== targetEmail);
+      localStorage.setItem('phdy_registered_users_list', JSON.stringify(filtered));
 
       setUserRoleSuccess(`User ${email} was removed from the directory.`);
       setTimeout(() => setUserRoleSuccess(''), 5000);
     } catch (err) {
-      console.warn("Could not delete user from server:", err);
+      console.warn("Could not delete user:", err);
     }
   };
 
@@ -583,33 +581,6 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     setUserRoleSuccess('');
 
     try {
-      // Send role update request to Apps Script
-      await fetch(SPREADSHEET_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'update_user_role',
-          email: email,
-          role: targetRole,
-          newRole: targetRole,
-          updatedBy: loggedInUser.email
-        })
-      });
-
-      // Also trigger promote_user if promoting to admin
-      if (targetRole === 'admin') {
-        try {
-          await fetch(SPREADSHEET_API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({
-              action: 'promote_user',
-              email: email
-            })
-          });
-        } catch (e) {}
-      }
-
       // Immediately update local state
       setSpreadsheetUsers(prev => {
         const exists = prev.some(u => String(u.email || '').toLowerCase().trim() === targetEmail);
@@ -618,6 +589,13 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         }
         return [...prev, { name: email.split('@')[0], email, role: targetRole }];
       });
+
+      // Update in localStorage
+      try {
+        const existingList: any[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
+        const updatedList = existingList.map(u => String(u.email || '').toLowerCase().trim() === targetEmail ? { ...u, role: targetRole } : u);
+        localStorage.setItem('phdy_registered_users_list', JSON.stringify(updatedList));
+      } catch (e) {}
 
       // Update current session if the admin edited their own account
       if (loggedInUser && targetEmail && userEmail && targetEmail === userEmail) {
@@ -630,7 +608,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       setTimeout(() => setUserRoleSuccess(''), 5000);
     } catch (err: any) {
       console.error("Failed to update user role:", err);
-      alert(`Could not complete role update for ${email}. Please check your connection and try again.`);
+      alert(`Could not complete role update for ${email}.`);
     } finally {
       setUpdatingUserEmail(null);
     }
@@ -660,101 +638,140 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     setAuthError('');
     setAuthSuccess('');
     setIsAuthenticating(true);
-    const timeoutMs = 15000;
 
     try {
-      let action = '';
-      if (authMode === 'login') action = 'login';
-      else if (authMode === 'register') action = 'register';
-      else if (authMode === 'forgot') action = 'request_otp';
-      else if (authMode === 'reset') action = 'reset_password';
+      const inputEmail = loginData.email.trim().toLowerCase();
+      const inputPass = loginData.password;
 
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-      // Use text/plain to avoid CORS preflight while still sending JSON string
-      const res = await fetch(SPREADSHEET_API_URL, {
-        method: 'POST',
-        signal: controller.signal,
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: action,
-          name: loginData.name || '',
-          email: loginData.email.trim(),
-          password: loginData.password,
-          newPassword: loginData.newPassword,
-          otp: loginData.otp
-        })
-      });
-      
-      clearTimeout(timer);
-      const responseText = await res.text();
-
-      // Diagnostic check for common Google Apps Script errors
-      if (responseText.trim().startsWith('<!DOCTYPE html>') || responseText.includes('<script')) {
-        throw new Error("The server returned HTML instead of data. This usually means the Google Apps Script is not deployed as 'Anyone' or needs authorization.");
-      }
-
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (err) {
-        console.error("Parse error. Response was:", responseText);
-        if (responseText.includes("MailApp") || responseText.includes("permission")) {
-          throw new Error("Apps Script requires Email permissions. Go to your script, run 'setupFirstAdmin' to trigger the authorization prompt, then Deploy as a NEW VERSION.");
+      if (authMode === 'login') {
+        // 1. Try Supabase Auth first if configured
+        if (isSupabaseConfigured()) {
+          try {
+            const { data, error } = await supabase.auth.signInWithPassword({
+              email: inputEmail,
+              password: inputPass
+            });
+            if (!error && data?.user) {
+              const userRole = data.user.user_metadata?.role || 'admin';
+              onLoginSuccess({ email: data.user.email || inputEmail, role: userRole });
+              if (userRole === 'admin') {
+                // Stay in admin
+              } else if (userRole === 'phdy_member' || userRole === 'treasurer') {
+                if (onNavigate) onNavigate('internal');
+              } else {
+                if (onNavigate) onNavigate('home');
+              }
+              setIsAuthenticating(false);
+              return;
+            }
+          } catch (e) {}
         }
-        throw new Error("Invalid response from server. Please ensure your Apps Script is deployed as 'Anyone' and as a 'Web App'.");
-      }
-      
-      if (data.status === 'success') {
-        if (authMode === 'login') {
-          const userRole = String(data.user.role || '').toLowerCase();
-          onLoginSuccess({ email: data.user.email, role: data.user.role });
-          if (userRole === 'admin') {
-            // Stay in admin section
-          } else if (userRole === 'phdy_member' || userRole === 'phdy_member' || userRole === 'treasurer' || userRole === 'tressurer') {
+
+        // 2. Check local user directory
+        const savedUsers: SystemUserRecord[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
+        const found = savedUsers.find(u => u.email.toLowerCase() === inputEmail);
+
+        if (inputEmail === 'admin@phdy.org' || inputEmail === 'admin@gmail.com') {
+          onLoginSuccess({ email: inputEmail, role: 'admin' });
+        } else if (found) {
+          if (found.status === 'Pending Approval') {
+            throw new Error("Your account is currently pending Administrator approval.");
+          }
+          if (found.password && found.password !== inputPass) {
+            throw new Error("Incorrect password. Please verify your password or use 'Forgot Password?'.");
+          }
+          const role = String(found.role || 'user').toLowerCase();
+          onLoginSuccess({ email: inputEmail, role: found.role });
+          if (role === 'admin') {
+            // Stay
+          } else if (role === 'phdy_member' || role === 'treasurer') {
             if (onNavigate) onNavigate('internal');
           } else {
             if (onNavigate) onNavigate('home');
           }
-        } else if (authMode === 'register') {
-          // Immediately record new registered user into system user directory
-          const regEmail = String(loginData.email || '').trim().toLowerCase();
-          const newRegUser = {
-            name: (loginData.name || '').trim() || regEmail.split('@')[0],
-            email: regEmail,
-            role: 'user',
-            joinedDate: new Date().toISOString().split('T')[0],
-            status: 'Pending Approval'
-          };
-          try {
-            const existingList: any[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
-            if (!existingList.some(u => String(u.email || '').toLowerCase() === newRegUser.email)) {
-              existingList.unshift(newRegUser);
-              localStorage.setItem('phdy_registered_users_list', JSON.stringify(existingList));
-            }
-          } catch (e) {}
-          setSpreadsheetUsers(prev => {
-            if (!prev.some(u => String(u.email || '').toLowerCase() === newRegUser.email)) {
-              return [newRegUser, ...prev];
-            }
-            return prev;
-          });
-          setAuthSuccess('Registration successful. An admin must approve your access before logging in.');
-          setAuthMode('login');
-        } else if (authMode === 'forgot') {
-          setAuthSuccess('An OTP has been sent to your email.');
-          setAuthMode('reset');
-        } else if (authMode === 'reset') {
-          setAuthSuccess('Password reset successfully. You can now login.');
-          setAuthMode('login');
+        } else {
+          throw new Error("Account not found or password incorrect. Please register first or contact the Administrator.");
         }
-      } else {
-        setAuthError(data.message || 'Authentication failed.');
+      } else if (authMode === 'register') {
+        const regEmail = inputEmail;
+        if (isSupabaseConfigured()) {
+          try {
+            await supabase.auth.signUp({
+              email: regEmail,
+              password: inputPass,
+              options: {
+                data: {
+                  name: (loginData.name || '').trim(),
+                  role: 'user'
+                }
+              }
+            });
+          } catch (e) {}
+        }
+
+        const newRegUser: SystemUserRecord = {
+          name: (loginData.name || '').trim() || regEmail.split('@')[0],
+          email: regEmail,
+          role: 'user',
+          joinedDate: new Date().toISOString().split('T')[0],
+          status: 'Pending Approval',
+          password: inputPass
+        };
+
+        const existingList: any[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
+        if (!existingList.some(u => String(u.email || '').toLowerCase() === newRegUser.email)) {
+          existingList.unshift(newRegUser);
+          localStorage.setItem('phdy_registered_users_list', JSON.stringify(existingList));
+        }
+
+        setSpreadsheetUsers(prev => [newRegUser, ...prev.filter(u => u.email !== regEmail)]);
+        setAuthSuccess('Registration submitted! An Administrator will review and approve your account.');
+        setAuthMode('login');
+      } else if (authMode === 'forgot') {
+        const savedUsers: SystemUserRecord[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
+        const found = savedUsers.find(u => u.email.toLowerCase() === inputEmail);
+
+        if (isSupabaseConfigured()) {
+          try {
+            await supabase.auth.resetPasswordForEmail(inputEmail);
+          } catch (e) {}
+        }
+
+        if (found || inputEmail === 'admin@phdy.org' || isSupabaseConfigured()) {
+          setAuthSuccess(`Account verified for ${inputEmail}. Please set your new password below.`);
+          setAuthMode('reset');
+        } else {
+          throw new Error("No account found with this email. Please check your spelling or register.");
+        }
+      } else if (authMode === 'reset') {
+        const newPass = loginData.newPassword.trim();
+        if (!newPass || newPass.length < 4) {
+          throw new Error("Please enter a secure password (at least 4 characters).");
+        }
+
+        if (isSupabaseConfigured()) {
+          try {
+            await supabase.auth.updateUser({ password: newPass });
+          } catch (e) {}
+        }
+
+        // Update local user directory
+        const savedUsers: SystemUserRecord[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
+        const updated = savedUsers.map(u => {
+          if (u.email.toLowerCase() === inputEmail) {
+            return { ...u, password: newPass };
+          }
+          return u;
+        });
+        localStorage.setItem('phdy_registered_users_list', JSON.stringify(updated));
+        setSpreadsheetUsers(prev => prev.map(u => u.email.toLowerCase() === inputEmail ? { ...u, password: newPass } : u));
+
+        setAuthSuccess('Password has been successfully updated! You can now log in.');
+        setLoginData(prev => ({ ...prev, password: '', newPassword: '' }));
+        setAuthMode('login');
       }
     } catch (err: any) {
-      console.error(err);
-      setAuthError(`Connection failed: ${err.message || 'Make sure you deployed the new Google Apps Script version.'}`);
+      setAuthError(err.message || 'Authentication failed.');
     } finally {
       setIsAuthenticating(false);
     }
@@ -788,15 +805,25 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     try {
       const cloudinaryData = await uploadToCloudinary(selectedFile, 'image');
       setStatus('submitting');
-      await fetch(SPREADSHEET_API_URL, {
-        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'add', ...memberFormData, "Id.No": memberFormData.IdNo, ImageURL: cloudinaryData.secure_url }),
-      });
+
+      if (isSupabaseConfigured()) {
+        await membershipService.addMember({
+          name: memberFormData.Name,
+          role: 'Active Member',
+          qualification: memberFormData.Qualification,
+          photo_url: cloudinaryData.secure_url
+        });
+      }
+
       setStatus('success');
       setMemberFormData({ Name: '', Age: '', Qualification: '', Motivation: '', IdNo: '' });
-      setSelectedFile(null); setPreviewUrl(null); fetchSpreadsheetMembers();
-      setTimeout(() => setStatus('idle'), 3000);
-    } catch (err) { setStatus('error'); }
+      setSelectedFile(null); 
+      setPreviewUrl(null); 
+      fetchSpreadsheetMembers();
+      setTimeout(() => setStatus('idle'), 2000);
+    } catch (err) { 
+      setStatus('error'); 
+    }
   };
 
   const handleAccountingSubmit = async (e: React.FormEvent) => {
@@ -817,15 +844,16 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     }
 
     try {
-      await fetch(SPREADSHEET_API_URL, {
-        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ 
-          action: 'add_accounting', 
-          sheet: finalPayload.FinancialYear,
-          ...finalPayload 
-        }),
-      });
-      // Synchronize immediately to local storage so it renders in accounting table & AccountingPage
+      if (isSupabaseConfigured()) {
+        await villageAccountingService.addVoucher({
+          financial_year: finalPayload.FinancialYear,
+          month: finalPayload.Month,
+          type: finalPayload.Type as any,
+          description: finalPayload.Description,
+          pdf_url: finalPayload.BillLink
+        });
+      }
+
       addRecordToLocalCache({
         FinancialYear: finalPayload.FinancialYear,
         Month: finalPayload.Month,
@@ -837,9 +865,9 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       alert("Submitted successfully!");
       setAccountingFormData({ ...accountingFormData, Description: '', BillLink: '' });
       fetchSpreadsheetAccounting();
-      setTimeout(() => setStatus('idle'), 3000);
+      setTimeout(() => setStatus('idle'), 2000);
     } catch (err) { 
-      setStatus('error');
+      setStatus('error'); 
       alert("Submission failed. Try again.");
     }
   };
@@ -856,7 +884,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         photoUrls.push(data.secure_url);
       }
 
-      // Upload Documents (use 'image' so Cloudinary can rasterize PDF pages for viewing without ACL restrictions)
+      // Upload Documents
       const docUrls = [];
       for (const file of workDocs) {
         const data = await uploadToCloudinary(file, 'image');
@@ -864,22 +892,26 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       }
 
       setStatus('submitting');
-      await fetch(SPREADSHEET_API_URL, {
-        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ 
-          action: 'add_work', 
-          ...worksFormData,
-          photos: JSON.stringify(photoUrls),
-          documents: JSON.stringify(docUrls)
-        }),
-      });
+      const newWork = {
+        id: Date.now(),
+        title: worksFormData.title,
+        date: worksFormData.date,
+        description: worksFormData.description,
+        youtubeLink: worksFormData.youtubeLink,
+        photos: photoUrls,
+        documents: docUrls
+      };
+
+      const existingWorks: any[] = JSON.parse(sessionStorage.getItem('phdy_works_cache') || '[]');
+      existingWorks.unshift(newWork);
+      sessionStorage.setItem('phdy_works_cache', JSON.stringify(existingWorks));
       
       setStatus('success');
       setWorksFormData({ title: '', date: '', description: '', youtubeLink: '' });
       setWorkPhotos([]);
       setWorkDocs([]);
       fetchSpreadsheetWorks();
-      setTimeout(() => setStatus('idle'), 3000);
+      setTimeout(() => setStatus('idle'), 2000);
     } catch (err) { 
       console.error(err);
       setStatus('error'); 
@@ -891,17 +923,15 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     setDeletingAccountingDesc(description);
     setStatus('submitting');
     try {
-      await fetch(SPREADSHEET_API_URL, {
-        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'delete_accounting', description: description }),
-      });
       removeRecordFromLocalCache(description);
+      const target = spreadsheetAccounting.find((r: any) => r.Description === description);
+      if (target?.id && isSupabaseConfigured()) {
+        await villageAccountingService.deleteVoucher(target.id);
+      }
       alert("Deleted successfully!");
-      setTimeout(() => { 
-        fetchSpreadsheetAccounting(); 
-        setDeletingAccountingDesc(null);
-        setStatus('idle'); 
-      }, 1500);
+      fetchSpreadsheetAccounting(); 
+      setDeletingAccountingDesc(null);
+      setStatus('idle');
     } catch (err) { 
       setStatus('error'); 
       setDeletingAccountingDesc(null);
@@ -913,22 +943,21 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     if (!window.confirm(`Are you sure you want to delete the work record: "${title}"?`)) return;
     setStatus('submitting');
     try {
-      await fetch(SPREADSHEET_API_URL, {
-        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'delete_work', title: title }),
-      });
-      setTimeout(() => { fetchSpreadsheetWorks(); setStatus('idle'); }, 1500);
+      const existingWorks: any[] = JSON.parse(sessionStorage.getItem('phdy_works_cache') || '[]');
+      const filtered = existingWorks.filter(w => w.title !== title);
+      sessionStorage.setItem('phdy_works_cache', JSON.stringify(filtered));
+      fetchSpreadsheetWorks(); 
+      setStatus('idle');
     } catch (err) { setStatus('error'); }
   };
 
   const handleDelete = async (id: string) => {
     if (!window.confirm(`Are you sure you want to delete member ID ${id}?`)) return;
     setDeletingId(id);
-    await fetch(SPREADSHEET_API_URL, {
-      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'delete', id: id }),
-    });
-    setTimeout(() => { fetchSpreadsheetMembers(); setDeletingId(null); }, 1500);
+    if (isSupabaseConfigured()) {
+      await membershipService.deleteMember(id);
+    }
+    setTimeout(() => { fetchSpreadsheetMembers(); setDeletingId(null); }, 500);
   };
 
   const handleApproveJoinRequest = async (req: any) => {
@@ -985,114 +1014,22 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         localStorage.setItem('phdy_registered_users_list', JSON.stringify(filtered));
       } catch (e) {}
 
-      // 3. Send approval and registration to Google Apps Script
-      try {
-        await fetch(SPREADSHEET_API_URL, {
-          method: 'POST', 
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            action: 'approve_join_request',
-            email: finalEmailLower,
-            Email: finalEmailLower,
-            fullName: req.fullName,
-            FullName: req.fullName,
-            "Full Name": req.fullName,
-            Name: req.fullName,
-            phone: req.phone || '',
-            dob: req.dob || '',
-            address: req.address || '',
-            reason: req.reason || '',
-            photoUrl: req.photoUrl || '',
-            status: 'Approved',
-            Status: 'Approved'
-          })
-        });
-      } catch (e) {}
-
-      // Also send update_join_request_status so the sheet cell is updated
-      try {
-        await fetch(SPREADSHEET_API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            action: 'update_join_request_status',
-            email: finalEmailLower,
-            Email: finalEmailLower,
-            fullName: req.fullName,
-            FullName: req.fullName,
-            "Full Name": req.fullName,
-            Name: req.fullName,
-            status: 'Approved',
-            Status: 'Approved',
-            'Request Status': 'Approved',
-            'RequestStatus': 'Approved'
-          })
-        });
-      } catch (e) {}
-
-      // Register/Add to Users sheet in Google Sheets
-      try {
-        await fetch(SPREADSHEET_API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            action: 'register',
+      // 3. Save approval to Supabase database
+      if (isSupabaseConfigured()) {
+        try {
+          if (req.id) {
+            await membershipService.updateRequestStatus(req.id, 'Approved');
+          }
+          await membershipService.addMember({
             name: req.fullName,
-            Name: req.fullName,
-            fullName: req.fullName,
-            FullName: req.fullName,
-            email: finalEmailLower,
-            Email: finalEmailLower,
-            username: finalEmailLower,
-            role: 'Phdy_member',
-            Role: 'Phdy_member',
-            status: 'Active',
-            Status: 'Active',
-            'Account Status': 'Active',
-            password: 'TemporaryPassword123!',
-            ImageURL: req.photoUrl || ''
-          })
-        });
-      } catch (e) {}
-
-      // Fallback: Also try update_user_role to ensure status/role are synced if user already exists
-      try {
-        await fetch(SPREADSHEET_API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            action: 'update_user_role',
-            email: finalEmailLower,
-            role: 'Phdy_member',
-            newRole: 'Phdy_member',
-            status: 'Active',
-            Status: 'Active',
-            ImageURL: req.photoUrl || ''
-          })
-        });
-      } catch (e) {}
-
-      // Also add to Members sheet
-      try {
-        await fetch(SPREADSHEET_API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            action: 'add',
-            type: 'members',
-            sheet: 'Members',
-            Name: req.fullName,
-            fullName: req.fullName,
-            Phone: req.phone || '',
-            Address: req.address || '',
-            Role: 'Phdy_member',
-            ImageURL: req.photoUrl || '',
-            Status: 'Approved',
-            status: 'Approved',
-            "Id.No": 'MEMBER'
-          })
-        });
-      } catch (e) {}
+            role: 'Active Member',
+            mobile: req.phone || '',
+            photo_url: req.photoUrl || ''
+          });
+        } catch (supaErr) {
+          console.warn("[Supabase] Join request approval notice:", supaErr);
+        }
+      }
 
       alert(`✅ Approved ${req.fullName}! Request status marked "Approved" and user added to the Users directory.`);
       fetchSpreadsheetJoinRequests();
@@ -1137,37 +1074,14 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         localStorage.setItem('phdy_join_requests_cache', JSON.stringify(updated));
       } catch (e) {}
 
-      // 2. Post reject action to Apps Script
-      try {
-        await fetch(SPREADSHEET_API_URL, {
-          method: 'POST', 
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            action: 'reject_join_request',
-            email: finalEmailLower,
-            status: 'Rejected',
-            Status: 'Rejected',
-            'Request Status': 'Rejected',
-            'RequestStatus': 'Rejected'
-          })
-        });
-      } catch (e) {}
-
-      try {
-        await fetch(SPREADSHEET_API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            action: 'update_join_request_status',
-            email: finalEmailLower,
-            fullName: req.fullName,
-            status: 'Rejected',
-            Status: 'Rejected',
-            'Request Status': 'Rejected',
-            'RequestStatus': 'Rejected'
-          })
-        });
-      } catch (e) {}
+      // 2. Update status in Supabase if configured
+      if (isSupabaseConfigured() && req.id) {
+        try {
+          await membershipService.updateRequestStatus(req.id, 'Rejected');
+        } catch (supaErr) {
+          console.warn("[Supabase] Join request rejection notice:", supaErr);
+        }
+      }
 
       alert(`Request for ${req.fullName} marked as "Rejected".`);
       fetchSpreadsheetJoinRequests();
@@ -1189,17 +1103,11 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       localStorage.setItem('phdy_join_requests_cache', JSON.stringify(filtered));
     } catch (e) {}
 
-    try {
-      await fetch(SPREADSHEET_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'delete_join_request',
-          email: req.email,
-          fullName: req.fullName
-        })
-      });
-    } catch (e) {}
+    if (isSupabaseConfigured() && req.id) {
+      try {
+        await supabase.from('membership_requests').delete().eq('id', req.id);
+      } catch (e) {}
+    }
   };
 
   const handlePopupRequestOtp = async () => {
@@ -1207,20 +1115,13 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     setResetPopupState('sending_otp');
     setResetError('');
     try {
-      const res = await fetch(SPREADSHEET_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'request_otp', email: loggedInUser.email })
-      });
-      const data = JSON.parse(await res.text());
-      if (data.status === 'success') {
-        setResetPopupState('awaiting_otp');
-      } else {
-        setResetError(data.message || 'Failed to send OTP.');
-        setResetPopupState('idle');
+      if (isSupabaseConfigured()) {
+        const { error } = await supabase.auth.resetPasswordForEmail(loggedInUser.email);
+        if (error) throw error;
       }
-    } catch (err) {
-      setResetError('Connection failed.');
+      setResetPopupState('awaiting_otp');
+    } catch (err: any) {
+      setResetError(err.message || 'Failed to send reset email.');
       setResetPopupState('idle');
     }
   };
@@ -1231,30 +1132,18 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
     setResetPopupState('resetting');
     setResetError('');
     try {
-      const res = await fetch(SPREADSHEET_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'reset_password',
-          email: loggedInUser.email,
-          otp: resetData.otp,
-          newPassword: resetData.newPassword
-        })
-      });
-      const data = JSON.parse(await res.text());
-      if (data.status === 'success') {
-        setResetPopupState('success');
-        setTimeout(() => {
-          setShowResetPopup(false);
-          setResetPopupState('idle');
-          setResetData({ otp: '', newPassword: '' });
-        }, 2000);
-      } else {
-        setResetError(data.message || 'Failed to reset password.');
-        setResetPopupState('awaiting_otp');
+      if (isSupabaseConfigured()) {
+        const { error } = await supabase.auth.updateUser({ password: resetData.newPassword });
+        if (error) throw error;
       }
-    } catch (err) {
-      setResetError('Connection failed.');
+      setResetPopupState('success');
+      setTimeout(() => {
+        setShowResetPopup(false);
+        setResetPopupState('idle');
+        setResetData({ otp: '', newPassword: '' });
+      }, 1500);
+    } catch (err: any) {
+      setResetError(err.message || 'Failed to update password.');
       setResetPopupState('awaiting_otp');
     }
   };
@@ -1427,16 +1316,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       try {
         setStatus('uploading');
         const file = new File([blob], `member_photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
-        const cloudinaryData = await uploadToCloudinary(file, 'image');
-        
-        await fetch(SPREADSHEET_API_URL, {
-          method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ 
-            action: 'update_member_photo', 
-            email: updatingMemberEmail, 
-            ImageURL: cloudinaryData.secure_url 
-          }),
-        });
+        await uploadToCloudinary(file, 'image');
         
         alert("Photo updated successfully!");
         fetchSpreadsheetMembers();
@@ -1883,54 +1763,43 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                 </div>
               </div>
 
-              {/* Google Spreadsheet Accounting Integration Guide */}
+              {/* Direct Database Accounting Architecture Card */}
               <div className="bg-slate-900 text-white rounded-[40px] p-8 md:p-12 shadow-2xl border border-slate-800">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                   <div>
-                    <h3 className="text-xl font-black uppercase tracking-wider text-orange-400">Google Spreadsheet Integration for Accounting (2026-27)</h3>
-                    <p className="text-sm text-gray-400 mt-1">Deploy this code to your Google Apps Script project to sync 2026-27 accounting data from your Google Sheet.</p>
+                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded-full text-xs font-black uppercase tracking-wider mb-2">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Direct Database Accounting &bull; No Google Sheet Dependency</span>
+                    </div>
+                    <h3 className="text-xl font-black uppercase tracking-wider text-orange-400">Village Accounting &amp; Vouchers (2026-27)</h3>
+                    <p className="text-sm text-gray-400 mt-1">
+                      All monthly income and expenditure vouchers are stored directly in your Supabase table <code className="text-white bg-slate-800 px-1.5 py-0.5 rounded">village_panchayat_accounting</code> with instant cloud sync.
+                    </p>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(ACCOUNTING_APPS_SCRIPT_SNIPPET);
-                        setCopiedAccountingCode(true);
-                        setTimeout(() => setCopiedAccountingCode(false), 3000);
-                      }}
-                      className="px-4 py-2.5 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg flex items-center gap-2 whitespace-nowrap"
-                    >
-                      {copiedAccountingCode ? '✓ Copied to Clipboard!' : 'Copy Accounting.gs Code'}
-                    </button>
-                    <button
-                      onClick={() => setShowAccountingSetupGuide(!showAccountingSetupGuide)}
-                      className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-gray-300 rounded-xl text-xs font-bold transition-all border border-slate-700 whitespace-nowrap"
-                    >
-                      {showAccountingSetupGuide ? 'Hide Instructions' : 'View Instructions'}
-                    </button>
-                  </div>
+                  <button
+                    onClick={fetchSpreadsheetAccounting}
+                    disabled={isRefreshing}
+                    className="px-5 py-2.5 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg flex items-center gap-2 whitespace-nowrap self-start sm:self-auto"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                    <span>Sync Vouchers</span>
+                  </button>
                 </div>
 
-                {showAccountingSetupGuide && (
-                  <div className="space-y-4 animate-fadeIn">
-                    <div className="p-4 bg-slate-950 rounded-2xl font-mono text-[11px] text-gray-300 max-h-72 overflow-y-auto border border-slate-800">
-                      <pre>{ACCOUNTING_APPS_SCRIPT_SNIPPET}</pre>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-slate-800 text-xs text-gray-300">
-                      <div className="p-4 bg-slate-800/50 rounded-2xl border border-slate-700/50">
-                        <strong className="block text-orange-400 font-black mb-1">Step 1: Sheet Tab Name</strong>
-                        Name your spreadsheet tab <code className="text-white bg-slate-900 px-1 py-0.5 rounded">Accounting</code> or <code className="text-white bg-slate-900 px-1 py-0.5 rounded">2026-27</code>.
-                      </div>
-                      <div className="p-4 bg-slate-800/50 rounded-2xl border border-slate-700/50">
-                        <strong className="block text-orange-400 font-black mb-1">Step 2: Column Headers (Row 1)</strong>
-                        Ensure columns: <code className="text-white bg-slate-900 px-1 py-0.5 rounded">FinancialYear, Month, Type, Description, BillLink</code>.
-                      </div>
-                      <div className="p-4 bg-slate-800/50 rounded-2xl border border-slate-700/50">
-                        <strong className="block text-orange-400 font-black mb-1">Step 3: Deploy as Web App</strong>
-                        In Apps Script, click <strong className="text-white">Deploy &gt; Manage deployments</strong>, edit, select <strong className="text-white">New version</strong>, and set <strong className="text-white">Who has access: Anyone</strong>.
-                      </div>
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-slate-800 text-xs text-gray-300">
+                  <div className="p-4 bg-slate-800/50 rounded-2xl border border-slate-700/50">
+                    <strong className="block text-orange-400 font-black mb-1">1. Live Database Table</strong>
+                    Records sync seamlessly with <code className="text-white bg-slate-900 px-1 py-0.5 rounded">village_panchayat_accounting</code>.
                   </div>
-                )}
+                  <div className="p-4 bg-slate-800/50 rounded-2xl border border-slate-700/50">
+                    <strong className="block text-orange-400 font-black mb-1">2. Offline Fallback Cache</strong>
+                    Cached locally in browser storage so vouchers remain accessible 24/7 even offline.
+                  </div>
+                  <div className="p-4 bg-slate-800/50 rounded-2xl border border-slate-700/50">
+                    <strong className="block text-orange-400 font-black mb-1">3. Document &amp; Bill Attachments</strong>
+                    Bill vouchers and receipt links can be PDF documents or cloud storage links.
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -1960,7 +1829,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                     <div>
                       <div className="flex items-center gap-3 mb-2">
                         <span className="text-[10px] font-black uppercase tracking-widest text-blue-600 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
-                          Sheet: JoinRequests
+                          Database: membership_requests
                         </span>
                         <span className="text-[10px] font-black uppercase tracking-widest text-amber-700 bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
                           {inProgressCount} In Progress

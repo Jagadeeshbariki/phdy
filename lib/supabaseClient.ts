@@ -432,6 +432,20 @@ export const phdyFundsService = {
     return data;
   },
 
+  // Delete a fund transaction
+  async deleteTransaction(id: string) {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const { error } = await supabase
+        .from('phdy_fund_transactions')
+        .delete()
+        .eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
   // Upload bill / receipt to Supabase Storage bucket 'phdy-receipts'
   async uploadReceipt(file: File) {
     if (!isSupabaseConfigured()) return null;
@@ -538,6 +552,112 @@ export const membershipService = {
     } catch {
       return null;
     }
+  },
+
+  // Get all membership applications / join requests
+  async getMembershipRequests() {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const { data, error } = await supabase
+        .from('membership_requests')
+        .select('*')
+        .order('submitted_at', { ascending: false });
+
+      if (error) return null;
+      return data;
+    } catch {
+      return null;
+    }
+  },
+
+  // Update a join request status ('Pending', 'Approved', 'Rejected')
+  async updateRequestStatus(id: string, status: 'Pending' | 'Approved' | 'Rejected') {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const { error } = await supabase
+        .from('membership_requests')
+        .update({ status })
+        .eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  // Approve a join request and promote to official members_directory
+  async approveAndCreateMember(req: {
+    requestId?: string;
+    name: string;
+    role?: string;
+    qualification?: string;
+    mobile?: string;
+    photo_url?: string;
+  }) {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      if (req.requestId) {
+        await supabase
+          .from('membership_requests')
+          .update({ status: 'Approved' })
+          .eq('id', req.requestId);
+      }
+      const { error } = await supabase
+        .from('members_directory')
+        .insert([{
+          name: req.name,
+          role: req.role || 'Active Member',
+          qualification: req.qualification || null,
+          mobile: req.mobile || null,
+          photo_url: req.photo_url || null,
+          is_active: true
+        }]);
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  // Add a member directly into members_directory
+  async addMember(member: {
+    name: string;
+    role?: string;
+    qualification?: string;
+    mobile?: string;
+    photo_url?: string;
+  }) {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const { data, error } = await supabase
+        .from('members_directory')
+        .insert([{
+          name: member.name,
+          role: member.role || 'Active Member',
+          qualification: member.qualification || null,
+          mobile: member.mobile || null,
+          photo_url: member.photo_url || null,
+          is_active: true
+        }])
+        .select()
+        .single();
+      if (error) return null;
+      return data;
+    } catch {
+      return null;
+    }
+  },
+
+  // Remove a member from directory
+  async deleteMember(id: string) {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const { error } = await supabase
+        .from('members_directory')
+        .delete()
+        .eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
   }
 };
 
@@ -568,6 +688,45 @@ export const villageAccountingService = {
   // Alias for getVouchersByYear
   async getAccountingVouchers(financialYear: string) {
     return this.getVouchersByYear(financialYear);
+  },
+
+  // Add a new accounting voucher
+  async addVoucher(voucher: {
+    financial_year: string;
+    month: string;
+    type: 'Income' | 'Expenditure';
+    description: string;
+    voucher_id?: string;
+    pdf_url?: string;
+    amount?: number;
+  }) {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const { data, error } = await supabase
+        .from('village_panchayat_accounting')
+        .insert([voucher])
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    } catch (e) {
+      console.warn('[Supabase] addVoucher error:', e);
+      return null;
+    }
+  },
+
+  // Delete an accounting voucher
+  async deleteVoucher(id: number | string) {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const { error } = await supabase
+        .from('village_panchayat_accounting')
+        .delete()
+        .eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
   },
 
   // Bulk seed/insert vouchers from Account_config.json into Supabase

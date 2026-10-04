@@ -2,14 +2,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { ACCOUNT_DATA, YearData, Transaction } from '../AccountData';
 import { getFinancialYearsList, getCurrentFinancialYear } from '../types';
-import { 
-  fetchSpreadsheetAccountingRecords, 
-  CleanAccountingRecord, 
-  ACCOUNTING_APPS_SCRIPT_SNIPPET 
-} from '../utils/accountingHelper';
+import { CleanAccountingRecord } from '../utils/accountingHelper';
 import { isSupabaseConfigured, villageAccountingService } from '../lib/supabaseClient';
-
-const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
 
 const FINANCIAL_MONTH_ORDER = [
   "April", "May", "June", "July", "August", "September", 
@@ -59,8 +53,6 @@ const AccountingPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isLiveConnected, setIsLiveConnected] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [showSetupGuide, setShowSetupGuide] = useState(false);
-  const [copiedSnippet, setCopiedSnippet] = useState(false);
 
   const loadAccountingData = useCallback(async () => {
     try {
@@ -84,13 +76,21 @@ const AccountingPage: React.FC = () => {
             return;
           }
         } catch (e) {
-          console.warn("[Supabase] Failed to fetch accounting, falling back to spreadsheet:", e);
+          console.warn("[Supabase] Failed to fetch accounting:", e);
         }
       }
 
-      const { records, isLiveConnected: connected } = await fetchSpreadsheetAccountingRecords(SPREADSHEET_API_URL);
-      setDynamicRecords(records);
-      setIsLiveConnected(connected);
+      // 2. Load from local cache
+      const cached = localStorage.getItem('phdy_accounting_local_records_v1');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setDynamicRecords(parsed);
+          }
+        } catch (e) {}
+      }
+      setIsLiveConnected(isSupabaseConfigured());
     } catch (err) {
       console.warn("Failed to load dynamic accounting:", err);
     } finally {
@@ -106,12 +106,6 @@ const AccountingPage: React.FC = () => {
   const handleManualSync = async () => {
     setIsRefreshing(true);
     await loadAccountingData();
-  };
-
-  const handleCopySnippet = () => {
-    navigator.clipboard.writeText(ACCOUNTING_APPS_SCRIPT_SNIPPET);
-    setCopiedSnippet(true);
-    setTimeout(() => setCopiedSnippet(false), 3000);
   };
 
   // Calculate current month and financial year for "Recent" filtering
@@ -243,7 +237,7 @@ const AccountingPage: React.FC = () => {
             <div>
               <p className="text-xs font-bold text-gray-800">
                 {isLiveConnected 
-                  ? 'Live Google Spreadsheet Synchronized' 
+                  ? 'Live Supabase Database Synchronized' 
                   : 'Displaying 2026-27 & Verified Baseline Accounting Records'}
               </p>
               <p className="text-[11px] text-gray-500">
@@ -253,58 +247,17 @@ const AccountingPage: React.FC = () => {
           </div>
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <button
-              onClick={() => setShowSetupGuide(!showSetupGuide)}
-              className="text-xs font-bold text-gray-600 hover:text-orange-600 px-3 py-1.5 rounded-xl border border-gray-200 hover:border-orange-200 bg-gray-50 transition-colors"
-            >
-              {showSetupGuide ? 'Hide Sheet Guide' : 'Sheet Setup Guide'}
-            </button>
-            <button
               onClick={handleManualSync}
               disabled={isRefreshing || loading}
-              className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
+              className="px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
             >
               <svg className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              <span>{isRefreshing ? 'Syncing...' : 'Sync Sheet'}</span>
+              <span>{isRefreshing ? 'Syncing...' : 'Sync Vouchers'}</span>
             </button>
           </div>
         </div>
-
-        {/* Expandable Google Apps Script Setup Guide */}
-        {showSetupGuide && (
-          <div className="max-w-4xl mx-auto mb-8 p-6 bg-slate-900 text-white rounded-3xl shadow-xl border border-slate-700 animate-fadeIn">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-sm font-black uppercase tracking-wider text-orange-400">Google Spreadsheet Integration for 2026-27 Accounting</h3>
-                <p className="text-xs text-gray-400 mt-1">If your Google Apps Script endpoint returns member records or needs the Accounting sheet handler, add this snippet to your script.</p>
-              </div>
-              <button
-                onClick={handleCopySnippet}
-                className="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold rounded-xl transition-all shadow flex items-center gap-1.5"
-              >
-                {copiedSnippet ? 'Copied to Clipboard!' : 'Copy Accounting.gs Code'}
-              </button>
-            </div>
-            <div className="p-4 bg-slate-950 rounded-2xl font-mono text-[11px] text-gray-300 max-h-56 overflow-y-auto border border-slate-800">
-              <pre>{ACCOUNTING_APPS_SCRIPT_SNIPPET}</pre>
-            </div>
-            <div className="mt-4 flex flex-wrap items-center gap-4 text-[11px] text-gray-400">
-              <span className="flex items-center gap-1">
-                <span className="w-1.5 h-1.5 bg-orange-400 rounded-full"></span>
-                Sheet tab name: <strong className="text-white">Accounting</strong> or <strong className="text-white">2026-27</strong>
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-1.5 h-1.5 bg-orange-400 rounded-full"></span>
-                Columns: <strong className="text-white">FinancialYear, Month, Type, Description, BillLink</strong>
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-1.5 h-1.5 bg-orange-400 rounded-full"></span>
-                Access permission: <strong className="text-white">Anyone</strong>
-              </span>
-            </div>
-          </div>
-        )}
 
         {/* Recent Transactions Section (Only Current Month) */}
         {!loading && recentTransactions.length > 0 && (

@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { CheckCircle2, ShieldCheck, UserCheck, Search, Sparkles, MapPin, Clock } from 'lucide-react';
 import aboutConfigData from '../public/AboutConfig.json';
-
-const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
+import { isSupabaseConfigured, membershipService } from '../lib/supabaseClient';
 
 export interface DisplayMember {
   id: string;
@@ -35,63 +34,25 @@ const MembersList: React.FC = () => {
       const config = Array.isArray(aboutConfigData) ? aboutConfigData[0] : aboutConfigData;
       const legacyMembers: any[] = config?.members || [];
 
-      // 2. Fetch Join Requests from Spreadsheet (looking for status === 'Approved')
-      let spreadsheetJoinRequests: any[] = [];
-      let spreadsheetUsers: any[] = [];
-      let spreadsheetDirectMembers: any[] = [];
+      // 2. Fetch approved members and join requests from Supabase
+      let supabaseMembers: any[] = [];
+      let supabaseRequests: any[] = [];
 
-      if (SPREADSHEET_API_URL && !SPREADSHEET_API_URL.includes('YOUR_GOOGLE_APPS_SCRIPT_URL')) {
-        const timeoutMs = 6000;
-        
-        // Parallel requests for join requests, users, and fallback members
-        const fetchWithTimeout = async (url: string, params?: Record<string, string>) => {
-          try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), timeoutMs);
-            const res = await fetch(url, { signal: controller.signal, cache: 'no-store' });
-            clearTimeout(timer);
-            const text = await res.text();
-            const data = parse(text);
-            if (data && data.length > 0) return data;
-          } catch (e) {}
-
-          // Fallback to POST
-          if (params) {
-            try {
-              const res = await fetch(SPREADSHEET_API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({ action: `get_${params.type}`, ...params })
-              });
-              const text = await res.text();
-              return parse(text);
-            } catch (e) {}
+      if (isSupabaseConfigured()) {
+        try {
+          const [activeMems, reqs] = await Promise.all([
+            membershipService.getActiveMembers(),
+            membershipService.getMembershipRequests()
+          ]);
+          if (activeMems && Array.isArray(activeMems)) {
+            supabaseMembers = activeMems;
           }
-          return [];
-        };
-
-        const parse = (text: string) => {
-          if (!text || text.trim().startsWith('<')) return [];
-          try {
-            const parsed = JSON.parse(text);
-            if (Array.isArray(parsed)) return parsed;
-            if (Array.isArray(parsed.data)) return parsed.data;
-            if (Array.isArray(parsed.requests)) return parsed.requests;
-            if (Array.isArray(parsed.users)) return parsed.users;
-            if (Array.isArray(parsed.records)) return parsed.records;
-            return [];
-          } catch (e) { return []; }
-        };
-
-        const [joinData, usersData, membersData] = await Promise.all([
-          fetchWithTimeout(`${SPREADSHEET_API_URL}?type=join_requests&sheet=JoinRequests&_t=${Date.now()}`, { type: 'join_requests', sheet: 'JoinRequests' }),
-          fetchWithTimeout(`${SPREADSHEET_API_URL}?type=users&_t=${Date.now()}`, { type: 'users' }),
-          fetchWithTimeout(`${SPREADSHEET_API_URL}?type=members&_t=${Date.now()}`, { type: 'members' })
-        ]);
-
-        spreadsheetJoinRequests = joinData;
-        spreadsheetUsers = usersData;
-        spreadsheetDirectMembers = membersData;
+          if (reqs && Array.isArray(reqs)) {
+            supabaseRequests = reqs;
+          }
+        } catch (err) {
+          console.warn("[Supabase] Member fetch notice:", err);
+        }
       }
 
       // 3. Merge Local Storage cache
@@ -107,7 +68,7 @@ const MembersList: React.FC = () => {
         if (savedUsers) cachedUsers = JSON.parse(savedUsers);
       } catch (e) {}
 
-      // Combine join requests (spreadsheet + local cache)
+      // Combine join requests (Supabase + local cache)
       const allJoinRequestsMap = new Map<string, any>();
       cachedRequests.forEach(r => {
         if (r) {
@@ -115,14 +76,23 @@ const MembersList: React.FC = () => {
           if (key) allJoinRequestsMap.set(key, r);
         }
       });
-      spreadsheetJoinRequests.forEach(r => {
+      supabaseRequests.forEach(r => {
         if (r) {
-          const email = r.Email || r.email || '';
-          const fullName = r.FullName || r.fullName || r.Name || r.name || '';
+          const email = r.email || '';
+          const fullName = r.full_name || '';
           const key = String(email || fullName).toLowerCase().trim();
           if (key) {
-            const existing = allJoinRequestsMap.get(key);
-            allJoinRequestsMap.set(key, { ...existing, ...r });
+            allJoinRequestsMap.set(key, {
+              fullName: r.full_name,
+              email: r.email,
+              phone: r.phone,
+              qualification: r.education,
+              motivation: r.motivation,
+              address: r.address,
+              photoUrl: r.photo_url,
+              status: r.status === 'Approved' ? 'Approved' : 'In Progress',
+              date: r.submitted_at
+            });
           }
         }
       });
@@ -139,23 +109,12 @@ const MembersList: React.FC = () => {
         return st === '' || st === 'in progress' || st === 'pending';
       });
 
-      // Combine users (spreadsheet + local cache)
+      // Combine users (local cache)
       const allUsersMap = new Map<string, any>();
       cachedUsers.forEach(u => {
         if (u) {
           const key = String(u.email || u.name || '').toLowerCase().trim();
           if (key) allUsersMap.set(key, u);
-        }
-      });
-      spreadsheetUsers.forEach(u => {
-        if (u) {
-          const email = u.Email || u.email || '';
-          const name = u.Name || u.name || '';
-          const key = String(email || name).toLowerCase().trim();
-          if (key) {
-            const existing = allUsersMap.get(key);
-            allUsersMap.set(key, { ...existing, ...u });
-          }
         }
       });
 
@@ -191,7 +150,29 @@ const MembersList: React.FC = () => {
         }
       });
 
-      // B. Add approved join requests (THE CORE FUNCTIONALITY REQUESTED BY USER)
+      // B. Add Supabase verified members from members_directory
+      supabaseMembers.forEach((sm: any) => {
+        const name = String(sm.name || '').trim();
+        const key = name.toLowerCase();
+        if (key && !membersMap.has(key)) {
+          membersMap.set(key, {
+            id: String(sm.id || `MEM-${idCounter++}`),
+            name: name,
+            role: sm.role || 'Active Member',
+            age: '',
+            qualification: sm.qualification || 'Nill',
+            motivation: 'Committed to village youth and community development.',
+            image: sm.photo_url || 'https://cdn-icons-png.flaticon.com/128/17798/17798443.png',
+            status: 'Approved',
+            statusLabel: sm.role || 'Active Member',
+            address: 'Pedda Harivanam',
+            phone: sm.mobile || undefined,
+            source: 'join_request'
+          });
+        }
+      });
+
+      // C. Add approved join requests
       approvedJoinRequests.forEach((req: any) => {
         const name = String(req.FullName || req.fullName || req.Name || req.name || 'Member').trim();
         const email = String(req.Email || req.email || '').trim();
@@ -293,22 +274,6 @@ const MembersList: React.FC = () => {
             address: 'Pedda Harivanam',
             email: email,
             source: 'user'
-          });
-        }
-      });
-
-      // E. Fallback: if old spreadsheet members sheet was filled, overlay any details
-      spreadsheetDirectMembers.forEach((m: any) => {
-        const name = String(m.Name || m.name || '').trim();
-        const key = String(name || '').toLowerCase();
-        if (key && membersMap.has(key)) {
-          const existing = membersMap.get(key)!;
-          membersMap.set(key, {
-            ...existing,
-            age: m.Age || existing.age,
-            qualification: m.Qualification || existing.qualification,
-            motivation: m.Motivation || existing.motivation,
-            image: m.ImageURL || existing.image
           });
         }
       });
