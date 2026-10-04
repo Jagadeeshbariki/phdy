@@ -1,6 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { CONTACT_SOCIAL_LINKS } from '../ContactData';
+import { isSupabaseConfigured, membershipService } from '../lib/supabaseClient';
 
 const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
 const CLOUDINARY_CLOUD_NAME = 'dbohmpxko';
@@ -121,6 +122,23 @@ const ContactSection: React.FC = () => {
         // Notify any active admin page
         window.dispatchEvent(new Event('phdy_join_requests_updated'));
       } catch (e) {}
+
+      // Submit to Supabase if configured
+      if (isSupabaseConfigured()) {
+        try {
+          await membershipService.submitJoinRequest({
+            fullName: formData.fullName.trim(),
+            phone: formData.phone.trim(),
+            email: formData.email.trim(),
+            dob: formData.dob,
+            address: formData.address.trim(),
+            motivation: formData.reason.trim(),
+            photoFile: selectedFile
+          });
+        } catch (supabaseErr: any) {
+          console.warn("[Supabase] Join request submission notice:", supabaseErr.message);
+        }
+      }
 
       await fetch(SPREADSHEET_API_URL, {
         method: 'POST', 

@@ -46,6 +46,7 @@ import {
   Area
 } from 'recharts';
 import CameraModal from '../components/CameraModal';
+import { isSupabaseConfigured, phdyFundsService } from '../lib/supabaseClient';
 
 const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
 const CLOUDINARY_CLOUD_NAME = 'dbohmpxko';
@@ -165,10 +166,41 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
     }
   };
 
-  // Fetch from Google Apps Script
+  // Fetch from Supabase or Google Apps Script fallback
   const fetchFundsFromSheet = async (showSyncIndicator = false) => {
     if (showSyncIndicator) setIsSyncing(true);
     else setIsLoading(true);
+
+    // 1. Try Supabase first if configured
+    if (isSupabaseConfigured()) {
+      try {
+        const supabaseData = await phdyFundsService.getTransactions();
+        if (supabaseData && supabaseData.length > 0) {
+          const mappedFunds: PHDYFundTransaction[] = supabaseData.map((row: any) => ({
+            id: row.id,
+            date: row.transaction_date,
+            name: row.contributor_or_payee,
+            type: row.type,
+            amount: Number(row.amount),
+            purpose: row.purpose,
+            category: row.category,
+            mode: row.payment_mode,
+            receiptUrl: row.receipt_voucher_url,
+            balanceAfter: row.balance_after ? Number(row.balance_after) : undefined
+          }));
+          setFunds(mappedFunds);
+          setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+          try {
+            localStorage.setItem(CACHE_KEY, JSON.stringify(mappedFunds));
+          } catch {}
+          setIsLoading(false);
+          setIsSyncing(false);
+          return;
+        }
+      } catch (err) {
+        console.warn("[Supabase] Failed to fetch funds, falling back:", err);
+      }
+    }
 
     const timeoutMs = 8000;
     try {
@@ -518,7 +550,21 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
 
     try {
       let receiptUrl = formState.billLink.trim();
-      if (formFile) {
+
+      // If Supabase is configured, upload receipt to Supabase Storage
+      if (formFile && isSupabaseConfigured()) {
+        try {
+          const supabaseReceipt = await phdyFundsService.uploadReceipt(formFile);
+          if (supabaseReceipt) {
+            receiptUrl = supabaseReceipt;
+          }
+        } catch (e) {
+          console.warn("Supabase receipt upload failed, attempting fallback:", e);
+        }
+      }
+
+      // Fallback to Cloudinary if Supabase upload didn't run or failed
+      if (formFile && !receiptUrl) {
         receiptUrl = await uploadReceipt(formFile);
       }
 
@@ -534,7 +580,26 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
         receiptUrl: receiptUrl
       };
 
-      // 1. Save to Google Apps Script POST
+      // 1. Save to Supabase if configured
+      if (isSupabaseConfigured()) {
+        try {
+          await phdyFundsService.addTransaction({
+            id: newTxn.id,
+            transaction_date: newTxn.date,
+            contributor_or_payee: newTxn.name,
+            type: newTxn.type === 'Debit' ? 'Debit' : 'Credit',
+            amount: newTxn.amount,
+            purpose: newTxn.purpose,
+            category: newTxn.category || 'General Contribution',
+            payment_mode: newTxn.mode || 'UPI',
+            receipt_voucher_url: newTxn.receiptUrl
+          });
+        } catch (err: any) {
+          console.warn("[Supabase] Direct transaction insert error:", err.message);
+        }
+      }
+
+      // 2. Save to Google Apps Script POST fallback
       try {
         await fetch(SPREADSHEET_API_URL, {
           method: 'POST',

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { MapContainer, TileLayer, GeoJSON, useMap, LayersControl } from 'react-leaflet';
+import { isSupabaseConfigured, landmarksService } from '../lib/supabaseClient';
 
 // Fix for default marker icons in Leaflet when using build tools
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -155,7 +156,19 @@ const VillageMapPage: React.FC = () => {
     try {
       let data: any = null;
 
-      // 1. If using the default point link, attempt fastest local bundled data first
+      // 1. Try Supabase first if configured and loading default landmarks
+      if (isSupabaseConfigured() && (url === DEFAULT_POINT_DATA_LINK || url.includes('1FfBr0ImlgQ7n3fFUeL4T7awunubQOMi1'))) {
+        try {
+          const supabaseGeoJson = await landmarksService.getLandmarksFeatureCollection();
+          if (supabaseGeoJson && supabaseGeoJson.features && supabaseGeoJson.features.length > 0) {
+            data = supabaseGeoJson;
+          }
+        } catch (e) {
+          console.warn("[Supabase] Failed to load landmarks from Supabase:", e);
+        }
+      }
+
+      // 2. If using the default point link, attempt fastest local bundled data next
       if (url === DEFAULT_POINT_DATA_LINK || url.includes('1FfBr0ImlgQ7n3fFUeL4T7awunubQOMi1')) {
         try {
           const directRes = await fetch(`/pedda_harivanam_points.geojson?v=${Date.now()}`);

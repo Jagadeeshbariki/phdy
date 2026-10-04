@@ -7,6 +7,7 @@ import {
   CleanAccountingRecord, 
   ACCOUNTING_APPS_SCRIPT_SNIPPET 
 } from '../utils/accountingHelper';
+import { isSupabaseConfigured, villageAccountingService } from '../lib/supabaseClient';
 
 const SPREADSHEET_API_URL = 'https://script.google.com/macros/s/AKfycbzdE2YpqlLvSqx1IzsHx7A0JMl_2uTZUssxEalLc1IsUUDIdFqaz3IU5C373pJolhs21Q/exec';
 
@@ -63,6 +64,30 @@ const AccountingPage: React.FC = () => {
 
   const loadAccountingData = useCallback(async () => {
     try {
+      // 1. Try Supabase if configured
+      if (isSupabaseConfigured()) {
+        try {
+          const currentYear = getCurrentFinancialYear();
+          const supabaseRows = await villageAccountingService.getAccountingVouchers(currentYear);
+          if (supabaseRows && supabaseRows.length > 0) {
+            const mapped: CleanAccountingRecord[] = supabaseRows.map((r: any) => ({
+              FinancialYear: r.financial_year || currentYear,
+              Month: r.month || 'General',
+              Type: r.type === 'Expenditure' ? 'Expenditure' : 'Income',
+              Description: r.description || '',
+              BillLink: r.pdf_url || ''
+            }));
+            setDynamicRecords(mapped);
+            setIsLiveConnected(true);
+            setLoading(false);
+            setIsRefreshing(false);
+            return;
+          }
+        } catch (e) {
+          console.warn("[Supabase] Failed to fetch accounting, falling back to spreadsheet:", e);
+        }
+      }
+
       const { records, isLiveConnected: connected } = await fetchSpreadsheetAccountingRecords(SPREADSHEET_API_URL);
       setDynamicRecords(records);
       setIsLiveConnected(connected);

@@ -2,13 +2,16 @@
 import React from 'react';
 import { FOOTER_DATA } from '../FooterData';
 import { LoggedInUser } from '../App';
+import { isSupabaseConfigured } from '../lib/supabaseClient';
+import { Database } from 'lucide-react';
 
 interface FooterProps {
   onNavClick: (page: any) => void;
   loggedInUser?: LoggedInUser | null;
+  onOpenSupabaseTester?: () => void;
 }
 
-const Footer: React.FC<FooterProps> = ({ onNavClick, loggedInUser }) => {
+const Footer: React.FC<FooterProps> = ({ onNavClick, loggedInUser, onOpenSupabaseTester }) => {
   const roleLower = String(loggedInUser?.role || '').toLowerCase();
   const isMemberOrAdmin = Boolean(
     loggedInUser && (roleLower === 'phdy_member' || roleLower === 'admin' || roleLower === 'treasurer' || roleLower === 'tressurer')
@@ -122,10 +125,35 @@ const Footer: React.FC<FooterProps> = ({ onNavClick, loggedInUser }) => {
           </div>
         ))}
 
-        <div className="mt-16 pt-8 border-t border-orange-400 text-center">
+        <div className="mt-16 pt-8 border-t border-orange-400 flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="text-sm font-bold text-gray-800">
             &copy; {new Date().getFullYear()} Pedda Harivanam Development Youth. All rights reserved.
           </p>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (onOpenSupabaseTester) {
+                onOpenSupabaseTester();
+              } else {
+                window.dispatchEvent(new CustomEvent('open-supabase-tester'));
+              }
+            }}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/95 hover:bg-white text-gray-800 text-xs font-semibold shadow-sm border border-orange-300 transition-all hover:shadow hover:scale-105 cursor-pointer"
+            title="Click to test Supabase connection & database tables"
+          >
+            <Database className="w-3.5 h-3.5 text-emerald-600" />
+            <span className="flex items-center gap-1.5">
+              <span>Supabase:</span>
+              <span className={`w-2 h-2 rounded-full ${isSupabaseConfigured() ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+              <span className={isSupabaseConfigured() ? 'text-emerald-700 font-bold' : 'text-amber-700'}>
+                {isSupabaseConfigured() ? 'Connected' : 'Offline / Setup'}
+              </span>
+            </span>
+            <span className="text-[10px] bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded font-mono font-bold ml-1">
+              Test
+            </span>
+          </button>
         </div>
       </div>
     </footer>

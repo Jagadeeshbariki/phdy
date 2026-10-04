@@ -10,6 +10,7 @@ import AdminPage from './pages/AdminPage';
 import PHDYInternalPage from './pages/PHDYInternalPage';
 import VillageMapPage from './pages/VillageMapPage';
 import Footer from './components/Footer';
+import { SupabaseConnectionTester } from './components/SupabaseConnectionTester';
 
 export type Page = 'home' | 'members' | 'ourworks' | 'accounting' | 'contact' | 'admin' | 'internal' | 'villagemap';
 
@@ -32,10 +33,17 @@ const hasAdminPortalAccess = (user: LoggedInUser | null) => {
 
 const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<Page>('home');
+  const [isSupabaseTesterOpen, setIsSupabaseTesterOpen] = useState(false);
   const [loggedInUser, setLoggedInUser] = useState<LoggedInUser | null>(() => {
     const saved = sessionStorage.getItem('phdy_admin_session');
     return saved ? JSON.parse(saved) : null;
   });
+
+  useEffect(() => {
+    const handleOpenSupabaseTester = () => setIsSupabaseTesterOpen(true);
+    window.addEventListener('open-supabase-tester', handleOpenSupabaseTester);
+    return () => window.removeEventListener('open-supabase-tester', handleOpenSupabaseTester);
+  }, []);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -157,7 +165,16 @@ const App: React.FC = () => {
         {renderPage()}
       </main>
 
-      <Footer onNavClick={navigateTo} loggedInUser={loggedInUser} />
+      <Footer 
+        onNavClick={navigateTo} 
+        loggedInUser={loggedInUser} 
+        onOpenSupabaseTester={() => setIsSupabaseTesterOpen(true)}
+      />
+
+      <SupabaseConnectionTester 
+        isOpen={isSupabaseTesterOpen} 
+        onClose={() => setIsSupabaseTesterOpen(false)} 
+      />
     </div>
   );
 };
