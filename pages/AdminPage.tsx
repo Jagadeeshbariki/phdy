@@ -1113,32 +1113,33 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
             await supabase.from('membership_requests').update({ status: 'Approved' }).eq('phone', req.phone);
           }
 
-          // Add to members table directly with resilient fallbacks
+          // Add to members table directly with schema-accurate payload
           try {
-            const memberPayloads = [
-              {
-                user_id: req.user_id || null,
-                full_name: req.fullName || finalEmailLower.split('@')[0],
-                qualification: req.education || req.dob || 'Graduate',
-                phone: req.phone || null,
-                photo_url: req.photoUrl || req.photo_url || null,
-                status: 'active'
-              },
-              {
-                full_name: req.fullName || finalEmailLower.split('@')[0],
-                phone: req.phone || null,
-                status: 'active'
-              },
-              {
-                full_name: req.fullName || finalEmailLower.split('@')[0]
-              }
-            ];
+            const dobVal = req.dob && String(req.dob).trim() !== '' ? req.dob : null;
+            const uIdVal = req.user_id && String(req.user_id).length > 10 ? req.user_id : null;
+            const randNum = `PHDY-${Math.floor(100000 + Math.random() * 900000)}`;
 
-            for (const p of memberPayloads) {
-              const { error } = await supabase.from('members').insert([p]);
-              if (!error) break;
-            }
-          } catch (e) {}
+            await supabase.from('members').upsert({
+              user_id: uIdVal,
+              membership_number: randNum,
+              full_name: req.fullName || finalEmailLower.split('@')[0],
+              qualification: req.qualification || req.education || req.dob || 'Graduate',
+              date_of_birth: dobVal,
+              phone: req.phone || null,
+              photo_url: req.photoUrl || req.photo_url || null,
+              status: 'active',
+              joined_at: new Date().toISOString(),
+              approved_at: new Date().toISOString()
+            }, { onConflict: 'user_id' });
+          } catch (e) {
+            try {
+              await supabase.from('members').insert([{
+                full_name: req.fullName || finalEmailLower.split('@')[0],
+                status: 'active',
+                joined_at: new Date().toISOString()
+              }]);
+            } catch (err) {}
+          }
 
           // Also ensure profile in public.profiles exists safely (avoiding non-existent columns)
           if (finalEmailLower) {
