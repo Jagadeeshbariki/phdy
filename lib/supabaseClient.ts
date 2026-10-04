@@ -579,15 +579,36 @@ export const membershipService = {
   async getMembershipRequests() {
     if (!isSupabaseConfigured()) return null;
     try {
-      const { data, error } = await supabase
+      // Try with submitted_at
+      let { data, error } = await supabase
         .from('membership_requests')
         .select('*')
         .order('submitted_at', { ascending: false });
 
-      if (error) return null;
+      if (error || !data) {
+        const res2 = await supabase
+          .from('membership_requests')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (!res2.error && res2.data) {
+          return res2.data;
+        }
+        const res3 = await supabase
+          .from('membership_requests')
+          .select('*');
+        if (!res3.error && res3.data) {
+          return res3.data;
+        }
+        return null;
+      }
       return data;
     } catch {
-      return null;
+      try {
+        const { data } = await supabase.from('membership_requests').select('*');
+        return data || null;
+      } catch {
+        return null;
+      }
     }
   },
 

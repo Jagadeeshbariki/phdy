@@ -120,32 +120,44 @@ export const membershipService = {
   async getAllMembershipRequests(filterStatus?: 'pending' | 'approved' | 'rejected' | 'all'): Promise<MembershipRequest[]> {
     if (!isSupabaseConfigured()) return [];
 
-    let query = supabase
-      .from('membership_requests')
-      .select(`
-        *,
-        profiles:user_id (
-          id,
-          full_name,
-          email,
-          status,
-          is_admin
-        )
-      `)
-      .order('submitted_at', { ascending: false });
+    try {
+      let query = supabase
+        .from('membership_requests')
+        .select(`
+          *,
+          profiles:user_id (
+            id,
+            full_name,
+            email,
+            status,
+            is_admin
+          )
+        `)
+        .order('submitted_at', { ascending: false });
 
-    if (filterStatus && filterStatus !== 'all') {
-      query = query.eq('status', filterStatus);
-    }
+      if (filterStatus && filterStatus !== 'all') {
+        query = query.eq('status', filterStatus);
+      }
 
-    const { data, error } = await query;
+      const { data, error } = await query;
+      if (!error && data) {
+        return data as MembershipRequest[];
+      }
+    } catch (e) {}
 
-    if (error) {
-      console.warn('[Supabase] Error fetching requests:', error.message);
-      return [];
-    }
+    // Fallback without relation join or ordering
+    try {
+      let q2 = supabase.from('membership_requests').select('*');
+      if (filterStatus && filterStatus !== 'all') {
+        q2 = q2.eq('status', filterStatus);
+      }
+      const { data, error } = await q2;
+      if (!error && data) {
+        return data as MembershipRequest[];
+      }
+    } catch (e) {}
 
-    return (data || []) as MembershipRequest[];
+    return [];
   },
 
   // 4. Admin: Approve Membership Request (Calls Atomic Supabase RPC `approve_membership_request`)
