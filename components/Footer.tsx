@@ -62,7 +62,7 @@ const Footer: React.FC<FooterProps> = ({ onNavClick, loggedInUser, onOpenSupabas
     { id: 'accounting', label: 'Accounting' },
     ...(isMemberOrAdmin ? [{ id: 'internal', label: 'PHDY Internal' }] : []),
     { id: 'contact', label: 'Contact Us' },
-    ...(isAdmin ? [{ id: 'admin', label: 'Admin Portal' }] : (!loggedInUser ? [{ id: 'admin', label: 'Sign In' }] : []))
+    ...(isAdmin ? [{ id: 'admin', label: 'Admin Portal' }] : (!loggedInUser ? [{ id: 'login', label: 'Sign In' }] : []))
   ];
 
   return (

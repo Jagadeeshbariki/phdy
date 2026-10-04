@@ -7,12 +7,13 @@ import ContactPage from './pages/ContactPage';
 import OurWorksPage from './pages/OurWorksPage';
 import AccountingPage from './pages/AccountingPage';
 import AdminPage from './pages/AdminPage';
+import { LoginPage } from './pages/LoginPage';
 import PHDYInternalPage from './pages/PHDYInternalPage';
 import VillageMapPage from './pages/VillageMapPage';
 import Footer from './components/Footer';
 import { SupabaseConnectionTester } from './components/SupabaseConnectionTester';
 
-export type Page = 'home' | 'members' | 'ourworks' | 'accounting' | 'contact' | 'admin' | 'internal' | 'villagemap';
+export type Page = 'home' | 'members' | 'ourworks' | 'accounting' | 'contact' | 'login' | 'admin' | 'internal' | 'villagemap';
 
 export interface LoggedInUser {
   email: string;
@@ -60,19 +61,16 @@ const App: React.FC = () => {
         }
       }
 
-      // Gate Admin: admin or treasurer only (treasurers manage funds, admins manage all)
-      if (path === 'admin' && user && !hasAdminPortalAccess(user)) {
-        if (hasInternalAccess(user)) {
-          setCurrentPage('internal');
-          window.location.hash = 'internal';
-        } else {
-          setCurrentPage('home');
-          window.location.hash = 'home';
+      // Gate Admin: admin only
+      if (path === 'admin') {
+        if (!user || user.role !== 'admin') {
+          setCurrentPage('login');
+          window.location.hash = 'login';
+          return;
         }
-        return;
       }
 
-      if (['home', 'members', 'ourworks', 'accounting', 'contact', 'admin', 'internal', 'villagemap'].includes(path)) {
+      if (['home', 'members', 'ourworks', 'accounting', 'contact', 'login', 'admin', 'internal', 'villagemap'].includes(path)) {
         setCurrentPage(path as Page);
       } else {
         setCurrentPage('home');
@@ -89,22 +87,17 @@ const App: React.FC = () => {
     // Gate PHDY Internal
     if (page === 'internal') {
       if (!hasInternalAccess(loggedInUser)) {
-        setCurrentPage('home');
-        window.location.hash = 'home';
+        setCurrentPage('login');
+        window.location.hash = 'login';
         window.scrollTo(0, 0);
         return;
       }
     }
 
-    // Gate Admin: admin or treasurer only
-    if (page === 'admin' && loggedInUser && !hasAdminPortalAccess(loggedInUser)) {
-      if (hasInternalAccess(loggedInUser)) {
-        setCurrentPage('internal');
-        window.location.hash = 'internal';
-      } else {
-        setCurrentPage('home');
-        window.location.hash = 'home';
-      }
+    // Gate Admin: admin only
+    if (page === 'admin' && (!loggedInUser || loggedInUser.role !== 'admin')) {
+      setCurrentPage('login');
+      window.location.hash = 'login';
       window.scrollTo(0, 0);
       return;
     }
@@ -135,10 +128,12 @@ const App: React.FC = () => {
         return <OurWorksPage />;
       case 'accounting':
         return <AccountingPage />;
+      case 'login':
+        return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
       case 'internal':
         // Protected: Only phdy_member, treasurer, or admin
         if (!hasInternalAccess(loggedInUser)) {
-          return <Home onNavigate={navigateTo} />;
+          return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
         }
         return <PHDYInternalPage onNavigate={navigateTo} loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onLogout={onLogout} />;
       case 'contact':
@@ -146,6 +141,9 @@ const App: React.FC = () => {
       case 'villagemap':
         return <VillageMapPage />;
       case 'admin':
+        if (!loggedInUser || loggedInUser.role !== 'admin') {
+          return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
+        }
         return <AdminPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onLogout={onLogout} onNavigate={navigateTo} />;
       default:
         return <Home onNavigate={navigateTo} />;

@@ -1,0 +1,517 @@
+import React, { useState, useEffect } from 'react';
+import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
+import { LoggedInUser, Page } from '../App';
+import { ShieldCheck, Lock, Mail, User, KeyRound, ArrowLeft, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
+
+interface LoginPageProps {
+  loggedInUser: LoggedInUser | null;
+  onLoginSuccess: (user: LoggedInUser) => void;
+  onNavigate: (page: Page) => void;
+}
+
+export const LoginPage: React.FC<LoginPageProps> = ({ loggedInUser, onLoginSuccess, onNavigate }) => {
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot' | 'reset'>('login');
+  const [loginData, setLoginData] = useState({
+    name: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+    role: 'user',
+    newPassword: ''
+  });
+
+  const [authError, setAuthError] = useState('');
+  const [authSuccess, setAuthSuccess] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+
+  // Check URL Hash for Supabase Auth redirect tokens (like password recovery or signup confirmation errors)
+  useEffect(() => {
+    const hash = window.location.hash;
+
+    // Check for error in hash (e.g. otp_expired)
+    if (hash.includes('error=') || hash.includes('error_code=')) {
+      if (hash.includes('otp_expired') || hash.includes('invalid')) {
+        setAuthError("The email link was invalid or has expired. If you need to reset your password, please use the 'Forgot Password' option below.");
+      } else {
+        const errorDesc = decodeURIComponent(hash.match(/error_description=([^&]*)/)?.[1]?.replace(/\+/g, ' ') || 'Authentication link error.');
+        setAuthError(errorDesc);
+      }
+      setAuthMode('login');
+    }
+
+    // Check for password recovery token
+    if (hash.includes('type=recovery') || hash.includes('access_token=')) {
+      setAuthMode('reset');
+      setAuthSuccess("Email verified! Please enter your new password below.");
+    }
+
+    // Supabase auth state listener
+    if (isSupabaseConfigured()) {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'PASSWORD_RECOVERY') {
+          setAuthMode('reset');
+          setAuthSuccess("Email link verified! Enter your new password below.");
+        } else if (event === 'SIGNED_IN' && session?.user) {
+          const userRole = session.user.user_metadata?.role || 'user';
+          onLoginSuccess({
+            email: session.user.email || '',
+            role: userRole
+          });
+          if (userRole === 'admin') {
+            onNavigate('admin');
+          } else if (userRole === 'phdy_member' || userRole === 'treasurer') {
+            onNavigate('internal');
+          }
+        }
+      });
+
+      return () => {
+        subscription.unsubscribe();
+      };
+    }
+  }, []);
+
+  const handleAuthAction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthSuccess('');
+    setIsAuthenticating(true);
+
+    try {
+      const inputEmail = loginData.email.trim().toLowerCase();
+      const inputPass = loginData.password;
+
+      // ----------------------------------------------------
+      // 1. SIGN IN MODE
+      // ----------------------------------------------------
+      if (authMode === 'login') {
+        if (!inputEmail || !inputPass) {
+          throw new Error("Please enter both email and password.");
+        }
+
+        // Try Supabase Auth first
+        if (isSupabaseConfigured()) {
+          try {
+            const { data, error } = await supabase.auth.signInWithPassword({
+              email: inputEmail,
+              password: inputPass
+            });
+
+            if (error) {
+              // If email not confirmed or invalid login credentials
+              if (error.message.includes("Email not confirmed")) {
+                throw new Error("Your email address has not been confirmed yet. Please check your inbox or contact the Administrator.");
+              }
+              if (error.message.includes("Invalid login credentials")) {
+                throw new Error("Incorrect email or password. Please verify your credentials or reset your password.");
+              }
+              throw error;
+            }
+
+            if (data?.user) {
+              const userRole = data.user.user_metadata?.role || 'user';
+              onLoginSuccess({ email: data.user.email || inputEmail, role: userRole });
+              
+              if (userRole === 'admin') {
+                onNavigate('admin');
+              } else if (userRole === 'phdy_member' || userRole === 'treasurer') {
+                onNavigate('internal');
+              } else {
+                setAuthSuccess("Logged in successfully! Your account is currently pending Administrator approval for PHDY Member internal access.");
+              }
+              setIsAuthenticating(false);
+              return;
+            }
+          } catch (supaErr: any) {
+            // Check fallback local registered users directory
+            const savedUsers: any[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
+            const found = savedUsers.find(u => String(u.email || '').toLowerCase().trim() === inputEmail);
+            
+            if (found) {
+              if (found.password && found.password !== inputPass) {
+                throw new Error("Incorrect password. Please verify your credentials or use Forgot Password.");
+              }
+              if (found.status === 'Pending Approval') {
+                throw new Error("Your account is currently pending Administrator review and approval.");
+              }
+              const role = found.role || 'user';
+              onLoginSuccess({ email: inputEmail, role });
+              if (role === 'admin') onNavigate('admin');
+              else if (role === 'phdy_member' || role === 'treasurer') onNavigate('internal');
+              else onNavigate('home');
+              setIsAuthenticating(false);
+              return;
+            }
+            throw new Error(supaErr.message || "Invalid credentials or account not registered.");
+          }
+        } else {
+          // Local fallback directory when Supabase is not configured
+          const savedUsers: any[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
+          const found = savedUsers.find(u => String(u.email || '').toLowerCase().trim() === inputEmail);
+          
+          if (!found) {
+            throw new Error("Account not found. Please register first.");
+          }
+          if (found.password && found.password !== inputPass) {
+            throw new Error("Incorrect password. Please try again.");
+          }
+          if (found.status === 'Pending Approval') {
+            throw new Error("Your account is currently pending Administrator approval.");
+          }
+
+          const role = found.role || 'user';
+          onLoginSuccess({ email: inputEmail, role });
+          if (role === 'admin') onNavigate('admin');
+          else if (role === 'phdy_member' || role === 'treasurer') onNavigate('internal');
+          else onNavigate('home');
+        }
+      }
+
+      // ----------------------------------------------------
+      // 2. REGISTER MODE
+      // ----------------------------------------------------
+      else if (authMode === 'register') {
+        if (!loginData.name.trim()) throw new Error("Full name is required.");
+        if (!inputEmail || !inputEmail.includes('@')) throw new Error("Please enter a valid email address.");
+        if (!inputPass || inputPass.length < 6) throw new Error("Password must be at least 6 characters long.");
+        if (inputPass !== loginData.confirmPassword) throw new Error("Passwords do not match.");
+
+        const regEmail = inputEmail;
+        const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/#login` : undefined;
+
+        let supaRegistered = false;
+        if (isSupabaseConfigured()) {
+          try {
+            const { data, error } = await supabase.auth.signUp({
+              email: regEmail,
+              password: inputPass,
+              options: {
+                emailRedirectTo: redirectUrl,
+                data: {
+                  name: loginData.name.trim(),
+                  role: 'user' // Default new registration role
+                }
+              }
+            });
+
+            if (error) {
+              if (error.message.includes("already registered")) {
+                throw new Error("An account with this email is already registered. Please sign in instead.");
+              }
+              throw error;
+            }
+            supaRegistered = true;
+          } catch (supaErr: any) {
+            if (supaErr.message?.includes("already registered")) {
+              throw supaErr;
+            }
+            console.warn("[Supabase Auth] SignUp Notice:", supaErr.message);
+          }
+        }
+
+        // Store registration in local pending directory
+        const newRegUser = {
+          name: loginData.name.trim(),
+          email: regEmail,
+          role: 'user',
+          joinedDate: new Date().toISOString().split('T')[0],
+          status: 'Pending Approval',
+          password: inputPass
+        };
+
+        const existingList: any[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
+        const filtered = existingList.filter(u => String(u.email || '').toLowerCase().trim() !== regEmail);
+        filtered.unshift(newRegUser);
+        localStorage.setItem('phdy_registered_users_list', JSON.stringify(filtered));
+
+        setAuthSuccess("Registration submitted successfully! Your account has been sent to the Administrator for approval as a PHDY Member.");
+        setAuthMode('login');
+        setLoginData(prev => ({ ...prev, password: '', confirmPassword: '' }));
+      }
+
+      // ----------------------------------------------------
+      // 3. FORGOT PASSWORD (REQUEST RESET LINK)
+      // ----------------------------------------------------
+      else if (authMode === 'forgot') {
+        if (!inputEmail || !inputEmail.includes('@')) {
+          throw new Error("Please enter your registered email address.");
+        }
+
+        const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/#login` : undefined;
+
+        if (isSupabaseConfigured()) {
+          const { error } = await supabase.auth.resetPasswordForEmail(inputEmail, {
+            redirectTo: redirectUrl
+          });
+
+          if (error) {
+            console.warn("[Supabase Reset Password Notice]:", error.message);
+          }
+        }
+
+        setAuthSuccess(`Password reset request processed for ${inputEmail}. If registered, you will receive a reset link.`);
+        setAuthMode('login');
+      }
+
+      // ----------------------------------------------------
+      // 4. RESET PASSWORD (SET NEW PASSWORD)
+      // ----------------------------------------------------
+      else if (authMode === 'reset') {
+        const newPass = loginData.newPassword.trim();
+        if (!newPass || newPass.length < 6) {
+          throw new Error("Please enter a new password with at least 6 characters.");
+        }
+
+        if (isSupabaseConfigured()) {
+          try {
+            const { error } = await supabase.auth.updateUser({ password: newPass });
+            if (error) throw error;
+          } catch (e: any) {
+            console.warn("[Supabase updateUser notice]:", e.message);
+          }
+        }
+
+        // Update in local registered users cache
+        try {
+          const savedUsers: any[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
+          const updated = savedUsers.map(u => {
+            if (String(u.email || '').toLowerCase().trim() === inputEmail) {
+              return { ...u, password: newPass };
+            }
+            return u;
+          });
+          localStorage.setItem('phdy_registered_users_list', JSON.stringify(updated));
+        } catch (e) {}
+
+        setAuthSuccess("Password has been successfully updated! You can now sign in with your new password.");
+        setAuthMode('login');
+        setLoginData(prev => ({ ...prev, password: '', newPassword: '' }));
+      }
+    } catch (err: any) {
+      setAuthError(err.message || 'Authentication operation failed.');
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  return (
+    <div className="min-h-[85vh] flex items-center justify-center px-4 bg-slate-50 py-12">
+      <div className="bg-white rounded-[40px] p-8 md:p-12 shadow-2xl border border-orange-50 w-full max-w-md animate-fadeIn">
+        {/* Header */}
+        <div className="text-center mb-6">
+          <div className="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-orange-200">
+            <img 
+              src="https://res.cloudinary.com/dbohmpxko/image/upload/v1729417549/LogoWithoutBG_qzoqus.png" 
+              alt="Logo" 
+              className="w-10 h-10 object-contain" 
+            />
+          </div>
+          <h1 className="text-2xl md:text-3xl font-black text-gray-900 uppercase tracking-tight mb-1">
+            {authMode === 'login' ? 'Portal Sign In' : 
+             authMode === 'register' ? 'Register Account' :
+             authMode === 'forgot' ? 'Reset Password' : 'Set New Password'}
+          </h1>
+          <p className="text-gray-400 font-bold text-[10px] uppercase tracking-widest">
+            Pedda Harivanam Youth Organization
+          </p>
+        </div>
+
+        {/* Tab switch between Sign In and Register */}
+        {(authMode === 'login' || authMode === 'register') && (
+          <div className="flex bg-gray-100 p-1.5 rounded-2xl mb-6">
+            <button
+              type="button"
+              onClick={() => { setAuthMode('login'); setAuthError(''); setAuthSuccess(''); }}
+              className={`flex-1 py-2.5 rounded-xl font-bold text-xs transition-all ${
+                authMode === 'login' 
+                  ? 'bg-white text-orange-600 shadow-sm' 
+                  : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAuthMode('register'); setAuthError(''); setAuthSuccess(''); }}
+              className={`flex-1 py-2.5 rounded-xl font-bold text-xs transition-all ${
+                authMode === 'register' 
+                  ? 'bg-white text-orange-600 shadow-sm' 
+                  : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              Register
+            </button>
+          </div>
+        )}
+
+        {/* Form */}
+        <form onSubmit={handleAuthAction} className="space-y-4">
+          {authMode === 'register' && (
+            <div>
+              <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1.5 ml-1">
+                Full Name
+              </label>
+              <div className="relative">
+                <User className="w-4 h-4 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                <input 
+                  required
+                  type="text" 
+                  className="w-full pl-11 pr-4 py-3.5 rounded-2xl bg-gray-50 border border-gray-200 outline-none focus:ring-4 focus:ring-orange-100 font-bold text-sm transition-all"
+                  placeholder="e.g. Ramesh Kumar"
+                  value={loginData.name}
+                  onChange={(e) => setLoginData({ ...loginData, name: e.target.value })}
+                />
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1.5 ml-1">
+              Email Address
+            </label>
+            <div className="relative">
+              <Mail className="w-4 h-4 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2" />
+              <input 
+                required
+                type="email" 
+                className="w-full pl-11 pr-4 py-3.5 rounded-2xl bg-gray-50 border border-gray-200 outline-none focus:ring-4 focus:ring-orange-100 font-bold text-sm transition-all"
+                placeholder="name@example.com"
+                value={loginData.email}
+                onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
+              />
+            </div>
+          </div>
+
+          {(authMode === 'login' || authMode === 'register') && (
+            <div>
+              <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1.5 ml-1">
+                Password
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                <input 
+                  required
+                  type="password" 
+                  className="w-full pl-11 pr-4 py-3.5 rounded-2xl bg-gray-50 border border-gray-200 outline-none focus:ring-4 focus:ring-orange-100 font-bold text-sm transition-all"
+                  placeholder="••••••••"
+                  value={loginData.password}
+                  onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
+                />
+              </div>
+            </div>
+          )}
+
+          {authMode === 'register' && (
+            <div>
+              <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1.5 ml-1">
+                Confirm Password
+              </label>
+              <div className="relative">
+                <KeyRound className="w-4 h-4 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                <input 
+                  required
+                  type="password" 
+                  className="w-full pl-11 pr-4 py-3.5 rounded-2xl bg-gray-50 border border-gray-200 outline-none focus:ring-4 focus:ring-orange-100 font-bold text-sm transition-all"
+                  placeholder="••••••••"
+                  value={loginData.confirmPassword}
+                  onChange={(e) => setLoginData({ ...loginData, confirmPassword: e.target.value })}
+                />
+              </div>
+            </div>
+          )}
+
+          {authMode === 'reset' && (
+            <div>
+              <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1.5 ml-1">
+                New Secure Password
+              </label>
+              <div className="relative">
+                <KeyRound className="w-4 h-4 text-gray-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                <input 
+                  required
+                  type="password" 
+                  className="w-full pl-11 pr-4 py-3.5 rounded-2xl bg-gray-50 border border-gray-200 outline-none focus:ring-4 focus:ring-orange-100 font-bold text-sm transition-all"
+                  placeholder="At least 6 characters"
+                  value={loginData.newPassword}
+                  onChange={(e) => setLoginData({ ...loginData, newPassword: e.target.value })}
+                />
+              </div>
+            </div>
+          )}
+
+          {authError && (
+            <div className="p-4 bg-red-50 text-red-700 rounded-2xl text-xs font-semibold border border-red-100 flex items-start gap-2 animate-fadeIn">
+              <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+              <span>{authError}</span>
+            </div>
+          )}
+
+          {authSuccess && (
+            <div className="p-4 bg-green-50 text-green-800 rounded-2xl text-xs font-semibold border border-green-200 flex items-start gap-2 animate-fadeIn">
+              <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
+              <span>{authSuccess}</span>
+            </div>
+          )}
+
+          <button 
+            disabled={isAuthenticating}
+            type="submit" 
+            className="w-full py-4 bg-orange-600 hover:bg-orange-700 active:scale-95 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-orange-500/20 transition-all disabled:opacity-50 text-xs flex items-center justify-center gap-2"
+          >
+            {isAuthenticating ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Processing...</span>
+              </>
+            ) : (
+              authMode === 'login' ? 'Sign In' :
+              authMode === 'register' ? 'Submit Registration' :
+              authMode === 'forgot' ? 'Send Reset Link' : 'Save New Password'
+            )}
+          </button>
+        </form>
+
+        {/* Footer actions */}
+        <div className="mt-6 flex flex-col space-y-2 text-center text-xs">
+          {authMode === 'login' && (
+            <button 
+              type="button" 
+              onClick={() => { setAuthMode('forgot'); setAuthError(''); setAuthSuccess(''); }} 
+              className="font-bold text-orange-600 hover:underline"
+            >
+              Forgot Password?
+            </button>
+          )}
+
+          {(authMode === 'forgot' || authMode === 'reset') && (
+            <button 
+              type="button" 
+              onClick={() => { setAuthMode('login'); setAuthError(''); setAuthSuccess(''); }} 
+              className="font-bold text-gray-500 hover:text-orange-600 flex items-center justify-center gap-1"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Sign In</span>
+            </button>
+          )}
+
+          <div className="pt-4 border-t border-gray-100 flex items-center justify-between text-gray-400 text-[11px]">
+            <button 
+              type="button" 
+              onClick={() => onNavigate('home')} 
+              className="hover:text-gray-700 font-medium"
+            >
+              &larr; Back to Home
+            </button>
+            <button 
+              type="button" 
+              onClick={() => onNavigate('contact')} 
+              className="hover:text-orange-600 font-medium"
+            >
+              Join Us (Apply) &rarr;
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};

@@ -181,16 +181,7 @@ const PHDYInternalPage: React.FC<PHDYInternalPageProps> = ({
         }
       }
 
-      // Check predefined default admin
-      if (emailLower === 'admin@phdy.org' || emailLower === 'admin@gmail.com' || emailLower === 'vyomanautjagadeesh@gmail.com' || emailLower.startsWith('admin@') || emailLower.includes('admin')) {
-        if (onLoginSuccess) {
-          onLoginSuccess({ email: emailLower, role: 'admin' });
-        }
-        setIsLoggingIn(false);
-        return;
-      }
-
-      throw new Error("Invalid credentials or account not registered. Please contact the Administrator.");
+      throw new Error("Invalid credentials or account not approved for PHDY Internal Treasury access.");
     } catch (err: any) {
       setLoginError(err.message || 'Authentication failed.');
     } finally {
