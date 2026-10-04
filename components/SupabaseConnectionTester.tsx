@@ -25,6 +25,7 @@ import {
   testSupabaseConnection, 
   setSupabaseRuntimeConfig, 
   clearSupabaseRuntimeConfig,
+  cleanSupabaseUrl,
   SupabaseTestResult,
   SupabaseTableStatus,
   SupabaseStorageStatus
@@ -158,8 +159,40 @@ export const SupabaseConnectionTester: React.FC<SupabaseConnectionTesterProps> =
   // Auto-run test once opened
   useEffect(() => {
     if (isOpen) {
-      handleRunTest();
+      const cfg = getSupabaseConfig();
+      if (cfg.isValid) {
+        setCustomUrl(cfg.url);
+        setCustomKey(cfg.anonKey);
+        handleRunTest(cfg.url, cfg.anonKey);
+      } else {
+        // Attempt immediate server fetch
+        fetch('/api/supabase-config')
+          .then(r => r.json())
+          .then(data => {
+            if (data?.configured && data.url && data.anonKey) {
+              setCustomUrl(data.url);
+              setCustomKey(data.anonKey);
+              setSupabaseRuntimeConfig(data.url, data.anonKey);
+              handleRunTest(data.url, data.anonKey);
+            } else {
+              handleRunTest();
+            }
+          })
+          .catch(() => handleRunTest());
+      }
     }
+
+    const onLoaded = () => {
+      const updated = getSupabaseConfig();
+      if (updated.isValid) {
+        setCustomUrl(updated.url);
+        setCustomKey(updated.anonKey);
+        handleRunTest(updated.url, updated.anonKey);
+      }
+    };
+
+    window.addEventListener('supabase-config-loaded', onLoaded);
+    return () => window.removeEventListener('supabase-config-loaded', onLoaded);
   }, [isOpen]);
 
   const handleRunTest = async (testUrl?: string, testKey?: string) => {
@@ -180,13 +213,15 @@ export const SupabaseConnectionTester: React.FC<SupabaseConnectionTesterProps> =
       setStatusMessage('Please enter both Supabase Project URL and Anon Public Key.');
       return;
     }
-    if (!customUrl.startsWith('https://')) {
+    const cleaned = cleanSupabaseUrl(customUrl);
+    if (!cleaned.startsWith('https://')) {
       setStatusMessage('Project URL must start with https://');
       return;
     }
-    setSupabaseRuntimeConfig(customUrl.trim(), customKey.trim());
+    setCustomUrl(cleaned);
+    setSupabaseRuntimeConfig(cleaned, customKey.trim());
     setStatusMessage('Credentials saved to browser session! Testing now...');
-    handleRunTest(customUrl.trim(), customKey.trim());
+    handleRunTest(cleaned, customKey.trim());
   };
 
   const handleClearRuntimeCredentials = () => {
@@ -480,6 +515,23 @@ export const SupabaseConnectionTester: React.FC<SupabaseConnectionTesterProps> =
                   <li>Click <span className="font-medium text-gray-800">API</span> in the left sub-menu</li>
                   <li>Copy <span className="font-mono font-medium">Project URL</span> and <span className="font-mono font-medium">anon / public key</span></li>
                 </ol>
+              </div>
+
+              {/* Vercel Environment Variables Guidance */}
+              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900">
+                <p className="font-bold flex items-center gap-1.5 text-amber-950 mb-1">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                  Adding to Vercel? Notice about &quot;Change variable to Config&quot;
+                </p>
+                <p className="text-amber-800 mb-2 leading-relaxed">
+                  When adding <code className="bg-amber-100 px-1 py-0.5 rounded font-mono font-semibold">VITE_SUPABASE_ANON_KEY</code> in Vercel, Vercel warns: 
+                  <em> &quot;Public prefixes expose values to the browser. If that’s safe, change the variable to Config&quot;</em>.
+                </p>
+                <div className="bg-white/80 p-2.5 rounded-lg border border-amber-200 space-y-1.5 text-amber-900">
+                  <p className="font-semibold">Two simple ways to resolve this in Vercel:</p>
+                  <p><strong>Option 1 (Recommended):</strong> Change the Vercel variable type dropdown from <strong>&quot;Sensitive&quot;</strong> to <strong>&quot;Config&quot;</strong> (or Plain text). This is 100% safe because Supabase anon keys are public client keys protected by database Row Level Security.</p>
+                  <p><strong>Option 2:</strong> You can also name them <code className="bg-gray-100 px-1 py-0.5 rounded font-mono">SUPABASE_URL</code> and <code className="bg-gray-100 px-1 py-0.5 rounded font-mono">SUPABASE_ANON_KEY</code> (without the VITE_ prefix). The app now automatically detects both!</p>
+                </div>
               </div>
 
               {statusMessage && (

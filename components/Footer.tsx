@@ -1,8 +1,8 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { FOOTER_DATA } from '../FooterData';
 import { LoggedInUser } from '../App';
-import { isSupabaseConfigured } from '../lib/supabaseClient';
+import { isSupabaseConfigured, getSupabaseClient } from '../lib/supabaseClient';
 import { Database } from 'lucide-react';
 
 interface FooterProps {
@@ -12,6 +12,42 @@ interface FooterProps {
 }
 
 const Footer: React.FC<FooterProps> = ({ onNavClick, loggedInUser, onOpenSupabaseTester }) => {
+  const [supabaseConnected, setSupabaseConnected] = useState<boolean>(() => isSupabaseConfigured());
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const checkLiveConnection = async () => {
+      if (!isSupabaseConfigured()) {
+        if (isMounted) setSupabaseConnected(false);
+        return;
+      }
+      try {
+        const client = getSupabaseClient();
+        const { error } = await client.auth.getSession();
+        if (isMounted) {
+          setSupabaseConnected(!error);
+        }
+      } catch {
+        if (isMounted) setSupabaseConnected(false);
+      }
+    };
+
+    checkLiveConnection();
+
+    const handleUpdate = () => {
+      checkLiveConnection();
+    };
+
+    window.addEventListener('supabase-config-loaded', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('supabase-config-loaded', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, []);
   const roleLower = String(loggedInUser?.role || '').toLowerCase();
   const isMemberOrAdmin = Boolean(
     loggedInUser && (roleLower === 'phdy_member' || roleLower === 'admin' || roleLower === 'treasurer' || roleLower === 'tressurer')
@@ -145,9 +181,9 @@ const Footer: React.FC<FooterProps> = ({ onNavClick, loggedInUser, onOpenSupabas
             <Database className="w-3.5 h-3.5 text-emerald-600" />
             <span className="flex items-center gap-1.5">
               <span>Supabase:</span>
-              <span className={`w-2 h-2 rounded-full ${isSupabaseConfigured() ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-              <span className={isSupabaseConfigured() ? 'text-emerald-700 font-bold' : 'text-amber-700'}>
-                {isSupabaseConfigured() ? 'Connected' : 'Offline / Setup'}
+              <span className={`w-2 h-2 rounded-full ${supabaseConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+              <span className={supabaseConnected ? 'text-emerald-700 font-bold' : 'text-amber-700 font-bold'}>
+                {supabaseConnected ? 'Connected' : 'Offline / Setup'}
               </span>
             </span>
             <span className="text-[10px] bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded font-mono font-bold ml-1">

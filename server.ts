@@ -56,6 +56,19 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Supabase runtime config endpoint
+  app.get("/api/supabase-config", (_req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    const rawUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
+    const cleanUrl = rawUrl.replace(/\/rest\/v1\/?$/, "").replace(/\/+$/, "");
+    const key = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY || "";
+    res.json({
+      url: cleanUrl,
+      anonKey: key,
+      configured: Boolean(cleanUrl && key && cleanUrl.startsWith("https://"))
+    });
+  });
+
   // Dedicated endpoints for local bundled geojson data (zero failure, 100% reliable)
   app.get("/api/points", (_req, res) => {
     res.setHeader("Content-Type", "application/json");

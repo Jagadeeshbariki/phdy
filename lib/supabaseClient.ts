@@ -1,10 +1,27 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
+// Clean and normalize Supabase project URL (stripping any accidental /rest/v1/ suffix, query params, etc.)
+export const cleanSupabaseUrl = (url: string): string => {
+  if (!url) return '';
+  const trimmed = url.trim();
+  try {
+    const parsed = new URL(trimmed);
+    // Origin cleanly strips /rest/v1 or any sub-path, yielding e.g. "https://xyz.supabase.co"
+    return parsed.origin;
+  } catch {
+    return trimmed
+      .replace(/\/rest\/v1.*$/i, '')
+      .replace(/\/auth\/v1.*$/i, '')
+      .replace(/\/storage\/v1.*$/i, '')
+      .replace(/\/+$/, '');
+  }
+};
+
 // Retrieve environment variables with fallback
 const getRawEnvConfig = () => {
   const metaEnv = (import.meta as any).env || {};
-  const envUrl = (metaEnv.VITE_SUPABASE_URL || '').trim();
-  const envKey = (metaEnv.VITE_SUPABASE_ANON_KEY || '').trim();
+  const envUrl = cleanSupabaseUrl(metaEnv.VITE_SUPABASE_URL || metaEnv.SUPABASE_URL || '');
+  const envKey = (metaEnv.VITE_SUPABASE_ANON_KEY || metaEnv.SUPABASE_ANON_KEY || metaEnv.SUPABASE_KEY || '').trim();
   return { envUrl, envKey };
 };
 
@@ -19,7 +36,12 @@ export const getSupabaseConfig = () => {
     const localUrl = localStorage.getItem('phdy_supabase_url');
     const localKey = localStorage.getItem('phdy_supabase_anon_key');
     if (localUrl && localKey) {
-      url = localUrl.trim();
+      const cleaned = cleanSupabaseUrl(localUrl);
+      // Auto-correct local storage if it had /rest/v1
+      if (cleaned !== localUrl) {
+        localStorage.setItem('phdy_supabase_url', cleaned);
+      }
+      url = cleaned;
       anonKey = localKey.trim();
       source = 'localStorage';
     } else if (envUrl && envKey) {
@@ -39,6 +61,25 @@ export const getSupabaseConfig = () => {
 
   return { url, anonKey, isValid, source: isValid ? source : 'unconfigured' };
 };
+
+// Auto-hydrate credentials from server-side environment if client cache is empty
+if (typeof window !== 'undefined') {
+  fetch('/api/supabase-config')
+    .then(r => r.json())
+    .then(data => {
+      if (data?.configured && data.url && data.anonKey) {
+        const cleaned = cleanSupabaseUrl(data.url);
+        const current = getSupabaseConfig();
+        if (!current.isValid) {
+          localStorage.setItem('phdy_supabase_url', cleaned);
+          localStorage.setItem('phdy_supabase_anon_key', data.anonKey);
+          recreateSupabaseClient();
+          window.dispatchEvent(new CustomEvent('supabase-config-loaded'));
+        }
+      }
+    })
+    .catch(() => {});
+}
 
 // Check if valid Supabase configuration is present
 export const isSupabaseConfigured = (): boolean => {
@@ -135,7 +176,7 @@ export const testSupabaseConnection = async (customUrl?: string, customKey?: str
   const startTime = performance.now();
   const config = getSupabaseConfig();
 
-  const testUrl = (customUrl || config.url || '').trim();
+  const testUrl = cleanSupabaseUrl(customUrl || config.url || '');
   const testKey = (customKey || config.anonKey || '').trim();
 
   const isConfigured = Boolean(
