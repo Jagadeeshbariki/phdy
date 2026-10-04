@@ -589,29 +589,41 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
             .maybeSingle();
 
           if (existingProf?.id) {
-            await supabase.from('profiles').update({
-              full_name: targetUser?.name || targetEmail.split('@')[0],
-              status: 'active'
-            }).eq('id', existingProf.id);
+            try {
+              await supabase.from('profiles').update({
+                full_name: targetUser?.name || targetEmail.split('@')[0],
+              }).eq('id', existingProf.id);
+            } catch (e) {}
           } else {
-            await supabase.from('profiles').insert([{
-              full_name: targetUser?.name || targetEmail.split('@')[0],
-              email: targetEmail,
-              status: 'active'
-            }]);
+            try {
+              await supabase.from('profiles').insert([{
+                full_name: targetUser?.name || targetEmail.split('@')[0],
+                email: targetEmail,
+              }]);
+            } catch (e) {}
           }
 
-          // 2. Update public.members_directory designation
-          const newDesignation = 
-            targetRole === 'admin' ? 'Administrator' :
-            targetRole === 'treasurer' ? 'Treasurer' :
-            targetRole === 'phdy_member' ? 'Active Member' : 'Member';
+          // 2. Update public.members_directory designation (with fallback)
+          try {
+            const newDesignation = 
+              targetRole === 'admin' ? 'Administrator' :
+              targetRole === 'treasurer' ? 'Treasurer' :
+              targetRole === 'phdy_member' ? 'Active Member' : 'Member';
 
-          const targetName = targetUser?.name || targetEmail.split('@')[0];
-          await supabase
-            .from('members_directory')
-            .update({ designation: newDesignation })
-            .ilike('name', `%${targetName}%`);
+            const targetName = targetUser?.name || targetEmail.split('@')[0];
+            const { error: dirErr } = await supabase
+              .from('members_directory')
+              .update({ designation: newDesignation })
+              .ilike('name', `%${targetName}%`);
+
+            if (dirErr) {
+              await supabase.from('members').update({ status: 'active' }).eq('email', targetEmail);
+            }
+          } catch (e) {
+            try {
+              await supabase.from('members').update({ status: 'active' }).eq('email', targetEmail);
+            } catch (err) {}
+          }
 
           // 3. Update public.membership_requests
           await supabase.from('membership_requests').update({
@@ -1118,9 +1130,9 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
             await supabase.from('membership_requests').update({ status: 'Approved' }).eq('phone', req.phone);
           }
 
-          // Add to members_directory with exact matching schema columns
+          // Add to members_directory with fallback to members table
           try {
-            await supabase.from('members_directory').insert([{
+            const { error: dirErr } = await supabase.from('members_directory').insert([{
               name: req.fullName || finalEmailLower.split('@')[0],
               designation: 'Active Member',
               education: req.education || req.dob || 'Graduate',
@@ -1128,11 +1140,30 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
               image_url: req.photoUrl || req.photo_url || null,
               is_active: true
             }]);
+            if (dirErr) {
+              await supabase.from('members').insert([{
+                user_id: req.user_id || null,
+                full_name: req.fullName || finalEmailLower.split('@')[0],
+                qualification: req.education || req.dob || 'Graduate',
+                phone: req.phone || null,
+                photo_url: req.photoUrl || req.photo_url || null,
+                status: 'active'
+              }]);
+            }
           } catch (memErr) {
-            console.warn('[members_directory insert]:', memErr);
+            try {
+              await supabase.from('members').insert([{
+                user_id: req.user_id || null,
+                full_name: req.fullName || finalEmailLower.split('@')[0],
+                qualification: req.education || req.dob || 'Graduate',
+                phone: req.phone || null,
+                photo_url: req.photoUrl || req.photo_url || null,
+                status: 'active'
+              }]);
+            } catch (e) {}
           }
 
-          // Also ensure profile in public.profiles is Active
+          // Also ensure profile in public.profiles exists safely (avoiding non-existent columns)
           if (finalEmailLower) {
             try {
               const { data: existingProf } = await supabase
@@ -1144,20 +1175,14 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
               if (existingProf?.id) {
                 await supabase.from('profiles').update({
                   full_name: req.fullName || finalEmailLower.split('@')[0],
-                  phone: req.phone || null,
-                  status: 'active'
                 }).eq('id', existingProf.id);
               } else {
                 await supabase.from('profiles').insert([{
                   full_name: req.fullName || finalEmailLower.split('@')[0],
                   email: finalEmailLower,
-                  phone: req.phone || null,
-                  status: 'active'
                 }]);
               }
-            } catch (pErr) {
-              console.warn('[Supabase Profiles Update Notice]:', pErr);
-            }
+            } catch (pErr) {}
           }
 
           // Automatically send activation / password setup email to the approved user
