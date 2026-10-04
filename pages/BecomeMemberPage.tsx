@@ -157,6 +157,7 @@ export const BecomeMemberPage: React.FC<BecomeMemberPageProps> = ({ onNavigate }
       // 2. Submit membership request
       await membershipService.submitMembershipRequest({
         userId: user.id,
+        email: user.email || profile?.email,
         photoUrl,
         dateOfBirth: dateOfBirth || undefined,
         phone: phone.trim(),

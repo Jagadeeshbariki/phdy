@@ -60,6 +60,7 @@ export const membershipService = {
   // 2. Submit "Become PHDY Member" Application
   async submitMembershipRequest(params: {
     userId: string;
+    email?: string;
     photoUrl?: string;
     dateOfBirth?: string;
     phone: string;
@@ -95,6 +96,7 @@ export const membershipService = {
       .from('membership_requests')
       .upsert({
         user_id: params.userId,
+        email: params.email || null,
         photo_url: params.photoUrl || null,
         date_of_birth: params.dateOfBirth || null,
         phone: params.phone.trim(),
