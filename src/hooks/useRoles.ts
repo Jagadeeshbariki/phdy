@@ -1,15 +1,29 @@
 import { useAuth } from '../auth/AuthProvider';
 
 export const useRoles = () => {
-  const { roles, hasRole, hasAnyRole, isAdmin, isMember, isLoading } = useAuth();
+  const { isAdmin, isMember, loading, profile, membership } = useAuth();
   return {
-    roles,
-    hasRole,
-    hasAnyRole,
-    isAdmin: isAdmin(),
-    isMember: isMember(),
-    isModerator: hasRole('moderator'),
-    isSuperAdmin: hasRole('super_admin'),
-    isLoading,
+    isAdmin,
+    isMember,
+    isUser: !isAdmin && !isMember,
+    isSuperAdmin: isAdmin,
+    isModerator: isMember,
+    isLoading: loading,
+    profile,
+    membership,
+    hasRole: (role: string) => {
+      const r = role.toLowerCase();
+      if (r === 'admin' || r === 'super_admin') return isAdmin;
+      if (r === 'member' || r === 'phdy_member') return isMember;
+      return true;
+    },
+    hasAnyRole: (roleList: string[]) => {
+      return roleList.some(role => {
+        const r = role.toLowerCase();
+        if (r === 'admin' || r === 'super_admin') return isAdmin;
+        if (r === 'member' || r === 'phdy_member') return isMember;
+        return true;
+      });
+    },
   };
 };

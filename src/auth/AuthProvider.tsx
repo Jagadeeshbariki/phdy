@@ -1,23 +1,19 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '../services/supabase';
-import { authService, UserProfile, PHDYMemberApplication } from './authService';
+import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
+import { authService, UserProfile, MembershipRequest, OfficialMember } from '../services/authService';
 
-interface AuthContextType {
+export interface AuthContextType {
   user: User | null;
   session: Session | null;
   profile: UserProfile | null;
-  roles: string[];
-  permissions: string[];
-  memberApplication: PHDYMemberApplication | null;
-  isLoading: boolean;
-  hasRole: (roleName: string) => boolean;
-  hasAnyRole: (roleNames: string[]) => boolean;
-  hasPermission: (permCode: string) => boolean;
-  hasAnyPermission: (permCodes: string[]) => boolean;
-  isAdmin: () => boolean;
-  isMember: () => boolean;
-  refreshUserData: () => Promise<void>;
+  membership: OfficialMember | null;
+  membershipRequest: MembershipRequest | null;
+  loading: boolean;
+  isAuthenticated: boolean;
+  isAdmin: boolean;
+  isMember: boolean;
+  refreshAuth: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -27,95 +23,111 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [roles, setRoles] = useState<string[]>(['user']);
-  const [permissions, setPermissions] = useState<string[]>(['view_public_data']);
-  const [memberApplication, setMemberApplication] = useState<PHDYMemberApplication | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [membership, setMembership] = useState<OfficialMember | null>(null);
+  const [membershipRequest, setMembershipRequest] = useState<MembershipRequest | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const loadUserData = async (currentUser: User) => {
+  const fetchUserData = useCallback(async (currentUser: User | null) => {
+    if (!currentUser) {
+      setProfile(null);
+      setMembership(null);
+      setMembershipRequest(null);
+      return;
+    }
+
     try {
-      const data = await authService.getUserData(currentUser.id);
-      setProfile(data.profile);
-      setRoles(data.roles);
-      setPermissions(data.permissions);
-      setMemberApplication(data.memberApplication);
+      const [userProfile, userMember, userReq] = await Promise.all([
+        authService.getCurrentProfile(currentUser.id),
+        authService.getCurrentMember(currentUser.id),
+        authService.getMembershipRequest(currentUser.id),
+      ]);
+
+      setProfile(userProfile);
+      setMembership(userMember);
+      setMembershipRequest(userReq);
+
+      // Sync user session state for backward compatibility
+      const role = userProfile?.is_admin
+        ? 'admin'
+        : userMember?.status === 'active'
+        ? 'phdy_member'
+        : 'user';
+
+      sessionStorage.setItem(
+        'phdy_admin_session',
+        JSON.stringify({
+          email: currentUser.email || userProfile?.email || '',
+          role,
+          id: currentUser.id,
+          name: userProfile?.full_name || '',
+        })
+      );
     } catch (err) {
-      console.warn('Error fetching user roles/permissions:', err);
+      console.warn('[AuthProvider] Error loading profile/membership state:', err);
     }
-  };
-
-  const refreshUserData = async () => {
-    if (user) {
-      await loadUserData(user);
-    }
-  };
-
-  useEffect(() => {
-    // 1. Initial Session Check
-    supabase.auth.getSession().then(({ data: { session: initSession } }) => {
-      setSession(initSession);
-      setUser(initSession?.user ?? null);
-      if (initSession?.user) {
-        loadUserData(initSession.user).finally(() => setIsLoading(false));
-      } else {
-        setIsLoading(false);
-      }
-    });
-
-    // 2. Real-time Auth State Listener
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
-      setSession(currentSession);
-      const currentUser = currentSession?.user ?? null;
-      setUser(currentUser);
-
-      if (currentUser) {
-        await loadUserData(currentUser);
-      } else {
-        setProfile(null);
-        setRoles(['user']);
-        setPermissions(['view_public_data']);
-        setMemberApplication(null);
-      }
-      setIsLoading(false);
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
   }, []);
 
-  const hasRole = (roleName: string) => {
-    const rLower = roleName.toLowerCase();
-    return roles.map(r => r.toLowerCase()).includes(rLower) || roles.map(r => r.toLowerCase()).includes('super_admin');
-  };
+  const refreshAuth = useCallback(async () => {
+    if (user) {
+      await fetchUserData(user);
+    }
+  }, [user, fetchUserData]);
 
-  const hasAnyRole = (roleNames: string[]) => {
-    const list = roleNames.map(r => r.toLowerCase());
-    return roles.some(r => list.includes(r.toLowerCase()) || r.toLowerCase() === 'super_admin');
-  };
+  useEffect(() => {
+    let mounted = true;
 
-  const hasPermission = (permCode: string) => {
-    return permissions.includes(permCode) || hasRole('super_admin');
-  };
+    // 1. Initial Session Resolution
+    if (isSupabaseConfigured()) {
+      supabase.auth.getSession().then(async ({ data: { session: initSession } }) => {
+        if (!mounted) return;
+        setSession(initSession);
+        setUser(initSession?.user ?? null);
+        if (initSession?.user) {
+          await fetchUserData(initSession.user);
+        }
+        if (mounted) setLoading(false);
+      }).catch(() => {
+        if (mounted) setLoading(false);
+      });
 
-  const hasAnyPermission = (permCodes: string[]) => {
-    return permCodes.some(p => permissions.includes(p)) || hasRole('super_admin');
-  };
+      // 2. Real-time Auth State Change Listener
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
+        if (!mounted) return;
+        setSession(currentSession);
+        const currentUser = currentSession?.user ?? null;
+        setUser(currentUser);
 
-  const isAdmin = () => hasRole('admin') || hasRole('super_admin');
-  const isMember = () => hasRole('member') || isAdmin();
+        if (currentUser) {
+          await fetchUserData(currentUser);
+        } else {
+          setProfile(null);
+          setMembership(null);
+          setMembershipRequest(null);
+        }
+        setLoading(false);
+      });
+
+      return () => {
+        mounted = false;
+        subscription.unsubscribe();
+      };
+    } else {
+      setLoading(false);
+    }
+  }, [fetchUserData]);
 
   const logout = async () => {
     await authService.logout();
     setUser(null);
     setSession(null);
     setProfile(null);
-    setRoles(['user']);
-    setPermissions(['view_public_data']);
-    setMemberApplication(null);
+    setMembership(null);
+    setMembershipRequest(null);
   };
+
+  const isAuthenticated = Boolean(user);
+  const isAdmin = Boolean(profile?.is_admin === true || (user?.user_metadata?.role || '').toLowerCase() === 'admin');
+  const isMember = Boolean(membership?.status === 'active' || isAdmin);
 
   return (
     <AuthContext.Provider
@@ -123,17 +135,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         session,
         profile,
-        roles,
-        permissions,
-        memberApplication,
-        isLoading,
-        hasRole,
-        hasAnyRole,
-        hasPermission,
-        hasAnyPermission,
+        membership,
+        membershipRequest,
+        loading,
+        isAuthenticated,
         isAdmin,
         isMember,
-        refreshUserData,
+        refreshAuth,
         logout,
       }}
     >

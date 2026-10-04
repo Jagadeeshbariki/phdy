@@ -1,5 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
+import { AuthProvider, useAuth } from './src/auth/AuthProvider';
 import Navbar from './components/Navbar';
 import Home from './pages/Home';
 import MembersPage from './pages/MembersPage';
@@ -12,35 +12,45 @@ import PHDYInternalPage from './pages/PHDYInternalPage';
 import VillageMapPage from './pages/VillageMapPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { SetPasswordPage } from './pages/SetPasswordPage';
+import { BecomeMemberPage } from './pages/BecomeMemberPage';
+import { MembershipStatusPage } from './pages/MembershipStatusPage';
+import { MyMembershipPage } from './pages/MyMembershipPage';
+import { UserProfilePage } from './pages/UserProfilePage';
 import Footer from './components/Footer';
 import { SupabaseConnectionTester } from './components/SupabaseConnectionTester';
 
-export type Page = 'home' | 'members' | 'ourworks' | 'accounting' | 'contact' | 'login' | 'admin' | 'internal' | 'villagemap' | 'dashboard' | 'set-password';
+export type Page = 
+  | 'home' 
+  | 'members' 
+  | 'ourworks' 
+  | 'accounting' 
+  | 'contact' 
+  | 'login' 
+  | 'admin' 
+  | 'internal' 
+  | 'villagemap' 
+  | 'dashboard' 
+  | 'set-password'
+  | 'become-member'
+  | 'membership-status'
+  | 'my-membership'
+  | 'profile';
 
 export interface LoggedInUser {
   email: string;
   role: 'admin' | 'treasurer' | 'Phdy_member' | 'user' | string;
 }
 
-const isMemberOrAbove = (user: LoggedInUser | null) => {
-  if (!user) return false;
-  const r = String(user.role).toLowerCase();
-  return r === 'phdy_member' || r === 'member' || r === 'admin' || r === 'super_admin' || r === 'treasurer' || r === 'tressurer' || r === 'moderator';
-};
-
-const isAdminOnly = (user: LoggedInUser | null) => {
-  if (!user) return false;
-  const r = String(user.role).toLowerCase();
-  return r === 'admin' || r === 'super_admin';
-};
-
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<Page>('home');
   const [isSupabaseTesterOpen, setIsSupabaseTesterOpen] = useState(false);
-  const [loggedInUser, setLoggedInUser] = useState<LoggedInUser | null>(() => {
-    const saved = sessionStorage.getItem('phdy_admin_session');
-    return saved ? JSON.parse(saved) : null;
-  });
+
+  const { user, profile, membership, isAdmin, isMember, logout } = useAuth();
+
+  const loggedInUser: LoggedInUser | null = user ? {
+    email: user.email || profile?.email || '',
+    role: isAdmin ? 'admin' : isMember ? 'phdy_member' : 'user'
+  } : null;
 
   useEffect(() => {
     const handleOpenSupabaseTester = () => setIsSupabaseTesterOpen(true);
@@ -52,10 +62,8 @@ const App: React.FC = () => {
     const handlePopState = () => {
       const rawHash = window.location.hash;
       const path = rawHash.replace('#', '').split('?')[0] as Page;
-      const session = sessionStorage.getItem('phdy_admin_session');
-      const user: LoggedInUser | null = session ? JSON.parse(session) : null;
 
-      // 0. Detect confirmation / password setup / recovery email token from Supabase
+      // 0. Detect confirmation / recovery / reset email tokens
       if (
         rawHash.includes('type=recovery') || 
         rawHash.includes('type=invite') || 
@@ -67,36 +75,27 @@ const App: React.FC = () => {
         return;
       }
 
-      // 1. Tier 3 Protected: Admin only
-      if (path === 'admin') {
-        if (!isAdminOnly(user)) {
-          setCurrentPage('login');
-          window.location.hash = 'login';
-          return;
-        }
-      }
+      // Valid pages
+      const validPages: Page[] = [
+        'home', 
+        'members', 
+        'ourworks', 
+        'accounting', 
+        'contact', 
+        'login', 
+        'admin', 
+        'internal', 
+        'villagemap', 
+        'dashboard', 
+        'set-password',
+        'become-member',
+        'membership-status',
+        'my-membership',
+        'profile'
+      ];
 
-      // 2. Tier 2 Protected: Member and Admin only (Members, PHDY Internal)
-      if (path === 'internal' || path === 'members') {
-        if (!isMemberOrAbove(user)) {
-          setCurrentPage('login');
-          window.location.hash = 'login';
-          return;
-        }
-      }
-
-      // 3. Tier 1 Protected: Registered User, Member, Admin (Accounting, Our Works, Tier Dashboard)
-      if (path === 'accounting' || path === 'ourworks' || path === 'dashboard') {
-        if (!user) {
-          setCurrentPage('login');
-          window.location.hash = 'login';
-          return;
-        }
-      }
-
-      // 4. Public Tiers & Specific Pages
-      if (['home', 'members', 'ourworks', 'accounting', 'contact', 'login', 'admin', 'internal', 'villagemap', 'dashboard', 'set-password'].includes(path)) {
-        setCurrentPage(path as Page);
+      if (validPages.includes(path)) {
+        setCurrentPage(path);
       } else {
         setCurrentPage('home');
       }
@@ -109,24 +108,24 @@ const App: React.FC = () => {
   }, []);
 
   const navigateTo = (page: Page) => {
-    // 1. Tier 3 Protected: Admin only
-    if (page === 'admin' && !isAdminOnly(loggedInUser)) {
+    // 1. Admin protection
+    if (page === 'admin' && !isAdmin) {
       setCurrentPage('login');
       window.location.hash = 'login';
       window.scrollTo(0, 0);
       return;
     }
 
-    // 2. Tier 2 Protected: Member & Admin only
-    if ((page === 'internal' || page === 'members') && !isMemberOrAbove(loggedInUser)) {
+    // 2. Member protection
+    if (page === 'internal' && !isMember) {
       setCurrentPage('login');
       window.location.hash = 'login';
       window.scrollTo(0, 0);
       return;
     }
 
-    // 3. Tier 1 Protected: Registered User, Member, Admin
-    if ((page === 'accounting' || page === 'ourworks' || page === 'dashboard') && !loggedInUser) {
+    // 3. Authenticated user protection
+    if (['dashboard', 'profile', 'become-member', 'membership-status', 'my-membership'].includes(page) && !user) {
       setCurrentPage('login');
       window.location.hash = 'login';
       window.scrollTo(0, 0);
@@ -138,14 +137,13 @@ const App: React.FC = () => {
     window.scrollTo(0, 0);
   };
 
-  const onLoginSuccess = (user: LoggedInUser) => {
-    setLoggedInUser(user);
-    sessionStorage.setItem('phdy_admin_session', JSON.stringify(user));
+  const onLoginSuccess = (usr: LoggedInUser) => {
+    sessionStorage.setItem('phdy_admin_session', JSON.stringify(usr));
+    navigateTo('home');
   };
 
-  const onLogout = () => {
-    setLoggedInUser(null);
-    sessionStorage.removeItem('phdy_admin_session');
+  const onLogout = async () => {
+    await logout();
     navigateTo('home');
   };
 
@@ -153,49 +151,70 @@ const App: React.FC = () => {
     switch (currentPage) {
       case 'home':
         return <Home onNavigate={navigateTo} loggedInUser={loggedInUser} />;
+      
       case 'set-password':
         return <SetPasswordPage onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
+      
       case 'dashboard':
-        if (!loggedInUser) {
+        if (!user) {
           return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
         }
         return <DashboardPage loggedInUser={loggedInUser} onNavigate={navigateTo} />;
+      
+      case 'profile':
+        if (!user) {
+          return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
+        }
+        return <UserProfilePage onNavigate={navigateTo} onLogout={onLogout} />;
+      
+      case 'become-member':
+        if (!user) {
+          return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
+        }
+        return <BecomeMemberPage onNavigate={navigateTo} />;
+      
+      case 'membership-status':
+        if (!user) {
+          return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
+        }
+        return <MembershipStatusPage onNavigate={navigateTo} />;
+      
+      case 'my-membership':
+        if (!user) {
+          return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
+        }
+        return <MyMembershipPage onNavigate={navigateTo} />;
+      
       case 'members':
-        // Tier 2 & Tier 3 only
-        if (!isMemberOrAbove(loggedInUser)) {
-          return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
-        }
         return <MembersPage />;
+      
       case 'ourworks':
-        // Tier 3 Admin only
-        if (!isAdminOnly(loggedInUser)) {
-          return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
-        }
         return <OurWorksPage />;
+      
       case 'accounting':
-        // Tier 1, Tier 2, Tier 3 (Registered users & above)
-        if (!loggedInUser) {
-          return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
-        }
         return <AccountingPage />;
+      
       case 'login':
         return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
+      
       case 'internal':
-        // Tier 2 & Tier 3 only (Protected: Only phdy_member, treasurer, or admin)
-        if (!isMemberOrAbove(loggedInUser)) {
+        if (!isMember) {
           return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
         }
         return <PHDYInternalPage onNavigate={navigateTo} loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onLogout={onLogout} />;
+      
       case 'contact':
         return <ContactPage />;
+      
       case 'villagemap':
         return <VillageMapPage />;
+      
       case 'admin':
-        // Tier 3 Admin only
-        if (!isAdminOnly(loggedInUser)) {
+        if (!isAdmin) {
           return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
         }
         return <AdminPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onLogout={onLogout} onNavigate={navigateTo} />;
+      
       default:
         return <Home onNavigate={navigateTo} loggedInUser={loggedInUser} />;
     }
@@ -225,6 +244,14 @@ const App: React.FC = () => {
         onClose={() => setIsSupabaseTesterOpen(false)} 
       />
     </div>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 };
 

@@ -2,23 +2,50 @@ import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 import { MembershipRequest, OfficialMember } from './authService';
 
 export const membershipService = {
-  // 1. Upload Membership Photo to Supabase Storage
+  // 1. Upload Membership Photo to Supabase Storage bucket 'membership-photos'
   async uploadMembershipPhoto(userId: string, file: File): Promise<string> {
     if (!isSupabaseConfigured()) throw new Error('Supabase is not configured.');
+
+    // Validate file type
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+    if (!validTypes.includes(file.type.toLowerCase())) {
+      throw new Error('Please upload a valid image file (JPG, PNG, or WebP).');
+    }
+
+    // Validate size (5MB max)
+    if (file.size > 5 * 1024 * 1024) {
+      throw new Error('Image size must be less than 5MB.');
+    }
 
     const fileExt = file.name.split('.').pop() || 'jpg';
     const filePath = `${userId}/profile_${Date.now()}.${fileExt}`;
 
-    const { error: uploadError } = await supabase.storage
-      .from('membership-photos')
+    // Upload to 'membership-photos' bucket with fallback to 'member-photos' if needed
+    let uploadedBucket = 'membership-photos';
+    let { error: uploadError } = await supabase.storage
+      .from(uploadedBucket)
       .upload(filePath, file, {
         upsert: true,
+        cacheControl: '3600',
       });
 
-    if (uploadError) throw uploadError;
+    if (uploadError) {
+      // Fallback bucket attempt
+      const fallbackBucket = 'member-photos';
+      const { error: fallbackError } = await supabase.storage
+        .from(fallbackBucket)
+        .upload(filePath, file, {
+          upsert: true,
+          cacheControl: '3600',
+        });
+      if (fallbackError) {
+        throw new Error(`Photo upload failed: ${uploadError.message}`);
+      }
+      uploadedBucket = fallbackBucket;
+    }
 
     const { data: { publicUrl } } = supabase.storage
-      .from('membership-photos')
+      .from(uploadedBucket)
       .getPublicUrl(filePath);
 
     return publicUrl;
@@ -35,31 +62,38 @@ export const membershipService = {
   }) {
     if (!isSupabaseConfigured()) throw new Error('Supabase is not configured.');
 
-    // Check if pending application already exists
-    const { data: existing } = await supabase
+    // Check if already an active member in `members`
+    const { data: existingMember } = await supabase
+      .from('members')
+      .select('id, membership_number, status')
+      .eq('user_id', params.userId)
+      .maybeSingle();
+
+    if (existingMember && existingMember.status === 'active') {
+      throw new Error('You are already an approved PHDY member.');
+    }
+
+    // Check existing request in `membership_requests`
+    const { data: existingReq } = await supabase
       .from('membership_requests')
       .select('id, status')
       .eq('user_id', params.userId)
       .maybeSingle();
 
-    if (existing && existing.status === 'pending') {
-      throw new Error('You already have a pending membership application under review.');
+    if (existingReq && existingReq.status === 'pending') {
+      throw new Error('You already have a membership application under review.');
     }
 
-    if (existing && existing.status === 'approved') {
-      throw new Error('You are already an approved PHDY Member.');
-    }
-
-    // Insert or update request
+    // Insert or update request in `membership_requests`
     const { data, error } = await supabase
       .from('membership_requests')
       .upsert({
         user_id: params.userId,
         photo_url: params.photoUrl || null,
         date_of_birth: params.dateOfBirth || null,
-        phone: params.phone,
-        qualification: params.qualification,
-        reason_to_join: params.reasonToJoin,
+        phone: params.phone.trim(),
+        qualification: params.qualification.trim(),
+        reason_to_join: params.reasonToJoin.trim(),
         status: 'pending',
         submitted_at: new Date().toISOString(),
         reviewed_at: null,
@@ -69,95 +103,18 @@ export const membershipService = {
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      throw new Error(`Could not submit application: ${error.message}`);
+    }
+
     return data;
   },
 
-  // 2b. Submit Join Request from Contact form (with auto-profile resolution)
-  async submitJoinRequest(data: {
-    fullName: string;
-    phone: string;
-    email?: string;
-    education?: string;
-    address?: string;
-    motivation?: string;
-    photoFile?: File | null;
-    photoUrl?: string;
-  }) {
-    if (!isSupabaseConfigured()) throw new Error('Supabase is not configured.');
-
-    // 1. Get current logged in user if available
-    let userId: string | null = null;
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (user) {
-      userId = user.id;
-    } else if (data.email) {
-      const cleanEmail = data.email.toLowerCase().trim();
-      // Check if profile exists
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('email', cleanEmail)
-        .maybeSingle();
-
-      if (prof?.id) {
-        userId = prof.id;
-      } else {
-        // Create auth user & profile for this applicant
-        const { data: signUpData } = await supabase.auth.signUp({
-          email: cleanEmail,
-          password: 'Phdy@' + Math.random().toString(36).substring(2, 8) + '!',
-          options: {
-            data: {
-              full_name: data.fullName,
-            },
-          },
-        });
-        if (signUpData?.user?.id) {
-          userId = signUpData.user.id;
-        }
-      }
-    }
-
-    if (!userId) {
-      throw new Error('Please sign in or register before submitting your membership application.');
-    }
-
-    // Upload photo if file provided
-    let finalPhotoUrl = data.photoUrl || '';
-    if (data.photoFile) {
-      try {
-        finalPhotoUrl = await this.uploadMembershipPhoto(userId, data.photoFile);
-      } catch (e) {
-        console.warn('Storage upload error:', e);
-      }
-    }
-
-    // Insert or update into membership_requests
-    const { data: inserted, error: insErr } = await supabase
-      .from('membership_requests')
-      .upsert({
-        user_id: userId,
-        photo_url: finalPhotoUrl || null,
-        phone: data.phone,
-        qualification: data.education || null,
-        reason_to_join: data.motivation || null,
-        status: 'pending',
-        submitted_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' })
-      .select()
-      .single();
-
-    if (insErr) throw insErr;
-    return { success: true, data: inserted };
-  },
-
   // 3. Admin: Fetch All Applications for Review
-  async getAllMembershipRequests(): Promise<MembershipRequest[]> {
+  async getAllMembershipRequests(filterStatus?: 'pending' | 'approved' | 'rejected' | 'all'): Promise<MembershipRequest[]> {
     if (!isSupabaseConfigured()) return [];
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('membership_requests')
       .select(`
         *,
@@ -171,60 +128,174 @@ export const membershipService = {
       `)
       .order('submitted_at', { ascending: false });
 
-    if (error) throw error;
+    if (filterStatus && filterStatus !== 'all') {
+      query = query.eq('status', filterStatus);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.warn('[Supabase] Error fetching requests:', error.message);
+      return [];
+    }
+
     return (data || []) as MembershipRequest[];
   },
 
-  // 4. Admin: Approve Membership Request (Calls Atomic Database RPC)
-  async approveMembershipRequest(requestId: string) {
+  // 4. Admin: Approve Membership Request (Calls Atomic Supabase RPC `approve_membership_request`)
+  async approveMembershipRequest(requestId: string, adminUserId?: string) {
     if (!isSupabaseConfigured()) throw new Error('Supabase is not configured.');
 
-    const { data, error } = await supabase.rpc('approve_membership_request', {
-      request_id: requestId,
-    });
+    // 1. First try calling the secure RPC function
+    try {
+      const { data, error } = await supabase.rpc('approve_membership_request', {
+        request_id: requestId,
+      });
 
-    if (error) throw error;
-    return data;
+      if (!error && data) {
+        return { success: true, data };
+      }
+    } catch (rpcErr) {
+      console.warn('[Supabase RPC] approve_membership_request error, using admin fallback:', rpcErr);
+    }
+
+    // 2. Direct fallback logic with admin permissions
+    const { data: req, error: reqErr } = await supabase
+      .from('membership_requests')
+      .select('*, profiles:user_id(full_name, email)')
+      .eq('id', requestId)
+      .single();
+
+    if (reqErr || !req) {
+      throw new Error('Membership application not found.');
+    }
+
+    // Generate unique membership number: PHDY-XXXXXX
+    const randomDigits = Math.floor(100000 + Math.random() * 900000);
+    const membershipNumber = `PHDY-${randomDigits}`;
+    const now = new Date().toISOString();
+
+    // Insert into `members` table
+    const { data: newMember, error: memberErr } = await supabase
+      .from('members')
+      .upsert({
+        user_id: req.user_id,
+        membership_number: membershipNumber,
+        full_name: req.profiles?.full_name || 'PHDY Member',
+        photo_url: req.photo_url || null,
+        date_of_birth: req.date_of_birth || null,
+        phone: req.phone || null,
+        qualification: req.qualification || null,
+        reason_to_join: req.reason_to_join || null,
+        joined_at: now,
+        approved_at: now,
+        approved_by: adminUserId || null,
+        status: 'active',
+        created_at: now,
+        updated_at: now,
+      }, { onConflict: 'user_id' })
+      .select()
+      .single();
+
+    if (memberErr) {
+      throw new Error(`Failed to create official member record: ${memberErr.message}`);
+    }
+
+    // Update status in `membership_requests`
+    await supabase
+      .from('membership_requests')
+      .update({
+        status: 'approved',
+        reviewed_at: now,
+        reviewed_by: adminUserId || null,
+        admin_remarks: 'Approved by Administrator',
+      })
+      .eq('id', requestId);
+
+    return {
+      success: true,
+      membership_number: membershipNumber,
+      member: newMember,
+    };
   },
 
-  // 5. Admin: Reject Membership Request (Calls Atomic Database RPC)
-  async rejectMembershipRequest(requestId: string, remarks?: string) {
+  // 5. Admin: Reject Membership Request (Calls Atomic Supabase RPC `reject_membership_request`)
+  async rejectMembershipRequest(requestId: string, remarks?: string, adminUserId?: string) {
     if (!isSupabaseConfigured()) throw new Error('Supabase is not configured.');
 
-    const { data, error } = await supabase.rpc('reject_membership_request', {
-      request_id: requestId,
-      remarks: remarks || 'Application does not meet the current membership criteria.',
-    });
+    const reason = (remarks || '').trim() || 'Application does not meet the current PHDY membership criteria.';
+    const now = new Date().toISOString();
 
-    if (error) throw error;
-    return data;
+    // 1. Try calling the secure RPC function
+    try {
+      const { data, error } = await supabase.rpc('reject_membership_request', {
+        request_id: requestId,
+        remarks: reason,
+      });
+
+      if (!error) {
+        return { success: true, data };
+      }
+    } catch (rpcErr) {
+      console.warn('[Supabase RPC] reject_membership_request error, using admin fallback:', rpcErr);
+    }
+
+    // 2. Direct fallback
+    const { error } = await supabase
+      .from('membership_requests')
+      .update({
+        status: 'rejected',
+        reviewed_at: now,
+        reviewed_by: adminUserId || null,
+        admin_remarks: reason,
+      })
+      .eq('id', requestId);
+
+    if (error) {
+      throw new Error(`Failed to reject application: ${error.message}`);
+    }
+
+    return { success: true };
   },
 
-  // 6. Public / Members Directory: Fetch ONLY Approved Active Members
+  // 6. Public / Members Directory: Fetch ONLY Approved Active Members from `members`
   async getActiveMembers(): Promise<OfficialMember[]> {
     if (!isSupabaseConfigured()) return [];
 
-    const { data, error } = await supabase
-      .from('members')
-      .select('*')
-      .eq('status', 'active')
-      .order('membership_number', { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .eq('status', 'active')
+        .order('membership_number', { ascending: true });
 
-    if (error) throw error;
-    return (data || []) as OfficialMember[];
+      if (error) {
+        console.warn('[Supabase] Error fetching active members:', error.message);
+        return [];
+      }
+
+      return (data || []) as OfficialMember[];
+    } catch (err: any) {
+      console.warn('[Supabase] Exception in getActiveMembers:', err.message);
+      return [];
+    }
   },
 
-  // 7. Get Specific Member Profile by User ID
+  // 7. Get Member Profile by User ID
   async getMemberProfile(userId: string): Promise<OfficialMember | null> {
     if (!isSupabaseConfigured()) return null;
 
-    const { data, error } = await supabase
-      .from('members')
-      .select('*')
-      .eq('user_id', userId)
-      .maybeSingle();
+    try {
+      const { data, error } = await supabase
+        .from('members')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle();
 
-    if (error) throw error;
-    return data as OfficialMember;
+      if (error) return null;
+      return data as OfficialMember;
+    } catch {
+      return null;
+    }
   },
 };

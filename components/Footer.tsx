@@ -56,36 +56,31 @@ const Footer: React.FC<FooterProps> = ({ onNavClick, loggedInUser, onOpenSupabas
 
   const siteMap: { id: string; label: string }[] = [];
   siteMap.push({ id: 'home', label: 'Home' });
+  siteMap.push({ id: 'members', label: 'Members Directory' });
   siteMap.push({ id: 'villagemap', label: 'Village Map' });
-
-  if (isMember || isAdmin) {
-    siteMap.push({ id: 'members', label: 'Members' });
-  }
-
-  if (isAdmin) {
-    siteMap.push({ id: 'ourworks', label: 'Our Works' });
-  }
-
-  if (isTier1User || isMember || isAdmin) {
-    siteMap.push({ id: 'accounting', label: 'Accounting' });
-  }
-
-  if (isMember || isAdmin) {
-    siteMap.push({ id: 'internal', label: 'PHDY Internal' });
-  }
+  siteMap.push({ id: 'accounting', label: 'Gram Panchayat Accounting' });
 
   if (!isGuest) {
-    siteMap.push({ id: 'dashboard', label: 'Tier Dashboard' });
+    siteMap.push({ id: 'dashboard', label: 'User Dashboard' });
+    siteMap.push({ id: 'profile', label: 'My Profile' });
+    if (isMember) {
+      siteMap.push({ id: 'my-membership', label: 'My Membership Card' });
+      siteMap.push({ id: 'internal', label: 'PHDY Internal Portal' });
+    } else {
+      siteMap.push({ id: 'become-member', label: 'Become a Member' });
+      siteMap.push({ id: 'membership-status', label: 'Membership Status' });
+    }
   }
 
   if (isAdmin) {
     siteMap.push({ id: 'admin', label: 'Admin Portal' });
+    siteMap.push({ id: 'ourworks', label: 'Our Works' });
   }
 
   siteMap.push({ id: 'contact', label: 'Contact Us' });
 
   if (isGuest) {
-    siteMap.push({ id: 'login', label: 'Sign In' });
+    siteMap.push({ id: 'login', label: 'Sign In / Register' });
   }
 
   return (

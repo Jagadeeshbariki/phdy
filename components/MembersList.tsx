@@ -1,539 +1,279 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { CheckCircle2, ShieldCheck, UserCheck, Search, Sparkles, MapPin, Clock } from 'lucide-react';
+import { CheckCircle2, ShieldCheck, UserCheck, Search, Sparkles, MapPin, Clock, Award, User } from 'lucide-react';
+import { membershipService } from '../src/services/membershipService';
+import { OfficialMember } from '../src/services/authService';
 import aboutConfigData from '../public/AboutConfig.json';
-import { isSupabaseConfigured, membershipService } from '../lib/supabaseClient';
 
 export interface DisplayMember {
   id: string;
+  membershipNumber: string;
   name: string;
   role: string;
-  age: string;
-  dob?: string;
   qualification: string;
-  motivation: string;
   image: string;
-  status: 'Approved' | 'In Progress';
-  statusLabel: string;
-  address?: string;
-  email?: string;
-  phone?: string;
-  source: 'join_request' | 'user' | 'legacy' | 'join_request_pending';
+  joinedDate: string;
+  status: 'active';
+  isFounding?: boolean;
 }
 
 const MembersList: React.FC = () => {
   const [members, setMembers] = useState<DisplayMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'all' | 'approved' | 'founding' | 'join_requests'>('all');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'official' | 'founding'>('all');
 
-  const fetchAllMembers = async () => {
+  const fetchMembers = async () => {
     try {
       setLoading(true);
 
-      // 1. Get static legacy founding members
-      const config = Array.isArray(aboutConfigData) ? aboutConfigData[0] : aboutConfigData;
-      const legacyMembers: any[] = config?.members || [];
-
-      // 2. Fetch approved members and join requests from Supabase
-      let supabaseMembers: any[] = [];
-      let supabaseRequests: any[] = [];
-
-      if (isSupabaseConfigured()) {
-        try {
-          const [activeMems, reqs] = await Promise.all([
-            membershipService.getActiveMembers(),
-            membershipService.getMembershipRequests()
-          ]);
-          if (activeMems && Array.isArray(activeMems)) {
-            supabaseMembers = activeMems;
-          }
-          if (reqs && Array.isArray(reqs)) {
-            supabaseRequests = reqs;
-          }
-        } catch (err) {
-          console.warn("[Supabase] Member fetch notice:", err);
-        }
+      // 1. Fetch official approved members from Supabase `members` table (WHERE status = 'active')
+      let officialApprovedMembers: OfficialMember[] = [];
+      try {
+        officialApprovedMembers = await membershipService.getActiveMembers();
+      } catch (err) {
+        console.warn('[Supabase Members Fetch]:', err);
       }
 
-      // 3. Merge Local Storage cache
-      let cachedRequests: any[] = [];
-      let cachedUsers: any[] = [];
-      try {
-        const savedReqs = localStorage.getItem('phdy_join_requests_cache');
-        if (savedReqs) cachedRequests = JSON.parse(savedReqs);
-      } catch (e) {}
+      // 2. Fetch founding team from config as baseline
+      const config = Array.isArray(aboutConfigData) ? aboutConfigData[0] : aboutConfigData;
+      const legacyFounding: any[] = config?.members || [];
 
-      try {
-        const savedUsers = localStorage.getItem('phdy_registered_users_list');
-        if (savedUsers) cachedUsers = JSON.parse(savedUsers);
-      } catch (e) {}
+      const list: DisplayMember[] = [];
+      const seenNames = new Set<string>();
 
-      // Combine join requests (Supabase + local cache)
-      const allJoinRequestsMap = new Map<string, any>();
-      cachedRequests.forEach(r => {
-        if (r) {
-          const key = String(r.email || r.fullName || '').toLowerCase().trim();
-          if (key) allJoinRequestsMap.set(key, r);
-        }
-      });
-      supabaseRequests.forEach(r => {
-        if (r) {
-          const email = r.email || '';
-          const fullName = r.full_name || '';
-          const key = String(email || fullName).toLowerCase().trim();
-          if (key) {
-            allJoinRequestsMap.set(key, {
-              fullName: r.full_name,
-              email: r.email,
-              phone: r.phone,
-              qualification: r.education,
-              motivation: r.motivation,
-              address: r.address,
-              photoUrl: r.photo_url,
-              status: r.status === 'Approved' ? 'Approved' : 'In Progress',
-              date: r.submitted_at
-            });
-          }
-        }
+      // A. Add official approved members from `members` table first
+      officialApprovedMembers.forEach((m) => {
+        const name = m.full_name?.trim() || 'PHDY Member';
+        const key = name.toLowerCase();
+        seenNames.add(key);
+
+        list.push({
+          id: m.id,
+          membershipNumber: m.membership_number,
+          name: name,
+          role: 'Official Member',
+          qualification: m.qualification || 'Active Contributor',
+          image: m.photo_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80',
+          joinedDate: new Date(m.joined_at || m.approved_at || m.created_at || Date.now()).toLocaleDateString(undefined, {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+          }),
+          status: 'active',
+          isFounding: false
+        });
       });
 
-      // Filter for approved join requests
-      const approvedJoinRequests = Array.from(allJoinRequestsMap.values()).filter(r => {
-        const st = String(r.Status || r.status || r['Request Status'] || r.RequestStatus || '').trim().toLowerCase();
-        return st === 'approved' || st === 'accept' || st === 'accepted';
-      });
-
-      // Filter for pending join requests (In progress)
-      const inProgressJoinRequests = Array.from(allJoinRequestsMap.values()).filter(r => {
-        const st = String(r.Status || r.status || r['Request Status'] || r.RequestStatus || '').trim().toLowerCase();
-        return st === '' || st === 'in progress' || st === 'pending';
-      });
-
-      // Combine users (local cache)
-      const allUsersMap = new Map<string, any>();
-      cachedUsers.forEach(u => {
-        if (u) {
-          const key = String(u.email || u.name || '').toLowerCase().trim();
-          if (key) allUsersMap.set(key, u);
-        }
-      });
-
-      const activeUsers = Array.from(allUsersMap.values()).filter(u => {
-        const st = String(u.Status || u.status || '').trim().toLowerCase();
-        const role = String(u.Role || u.role || '').trim().toLowerCase();
-        return st === 'active' || st === 'approved' || role === 'phdy_member' || role === 'admin' || role === 'treasurer';
-      });
-
-      // 4. Assemble the final Master Members list
-      const membersMap = new Map<string, DisplayMember>();
-      let idCounter = 1;
-
-      // A. Add founding/legacy members first
-      legacyMembers.forEach((m: any) => {
-        const name = String(m.Name || m.name || '').trim();
-        const key = String(name || '').toLowerCase();
-        if (key) {
-          const idStr = String(m["Id.No"] || m["id"] || idCounter++);
-          membersMap.set(key, {
-            id: idStr,
+      // B. Add founding members from config
+      legacyFounding.forEach((f: any, idx: number) => {
+        const name = String(f.Name || f.name || '').trim();
+        const key = name.toLowerCase();
+        if (key && !seenNames.has(key)) {
+          seenNames.add(key);
+          list.push({
+            id: `founding-${idx + 1}`,
+            membershipNumber: `PHDY-F${String(idx + 1).padStart(3, '0')}`,
             name: name,
             role: 'Founding Member',
-            age: String(m.Age || m.age || ''),
-            qualification: String(m.Qualification || m.qualification || 'Nill'),
-            motivation: String(m.Motivation || m.motivation || 'Dedicated to the progress and empowerment of Pedda Harivanam village.'),
-            image: m.ImageURL || m.image || 'https://cdn-icons-png.flaticon.com/128/17798/17798443.png',
-            status: 'Approved',
-            statusLabel: 'Founding Member',
-            address: 'Pedda Harivanam',
-            source: 'legacy'
+            qualification: f.Qualification || f.qualification || 'Community Leader',
+            image: f.ImageURL || f.image || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&auto=format&fit=crop&q=80',
+            joinedDate: 'Founding Batch (2020)',
+            status: 'active',
+            isFounding: true
           });
         }
       });
 
-      // B. Add Supabase verified members from members_directory
-      supabaseMembers.forEach((sm: any) => {
-        const name = String(sm.name || '').trim();
-        const key = name.toLowerCase();
-        if (key && !membersMap.has(key)) {
-          membersMap.set(key, {
-            id: String(sm.id || `MEM-${idCounter++}`),
-            name: name,
-            role: sm.role || 'Active Member',
-            age: '',
-            qualification: sm.qualification || 'Nill',
-            motivation: 'Committed to village youth and community development.',
-            image: sm.photo_url || 'https://cdn-icons-png.flaticon.com/128/17798/17798443.png',
-            status: 'Approved',
-            statusLabel: sm.role || 'Active Member',
-            address: 'Pedda Harivanam',
-            phone: sm.mobile || undefined,
-            source: 'join_request'
-          });
-        }
-      });
-
-      // C. Add approved join requests
-      approvedJoinRequests.forEach((req: any) => {
-        const name = String(req.FullName || req.fullName || req.Name || req.name || 'Member').trim();
-        const email = String(req.Email || req.email || '').trim();
-        const key = String(email || name || '').toLowerCase();
-
-        // Calculate age from DOB if age not provided
-        let derivedAge = String(req.Age || req.age || '');
-        const dobStr = req.DOB || req.dob;
-        if (!derivedAge && dobStr) {
-          try {
-            const birthYear = new Date(dobStr).getFullYear();
-            if (!isNaN(birthYear)) {
-              derivedAge = String(new Date().getFullYear() - birthYear);
-            }
-          } catch (e) {}
-        }
-
-        const memberRecord: DisplayMember = {
-          id: String(req["Id.No"] || req.IdNo || req.id || `PHDY-${idCounter++}`),
-          name: name,
-          role: 'PHDY Youth Member',
-          age: derivedAge || '25',
-          dob: dobStr || '',
-          qualification: req.Qualification || req.qualification || req.Education || req.education || 'Graduate',
-          motivation: req.Reason || req.reason || req.Motivation || req.motivation || 'Committed to village welfare, education, and community progress.',
-          image: req.PhotoUrl || req.photoUrl || req.Photo || req.ImageURL || req.image || 'https://cdn-icons-png.flaticon.com/128/17798/17798443.png',
-          status: 'Approved',
-          statusLabel: 'Approved Member',
-          address: req.Address || req.address || 'Pedda Harivanam',
-          email: email,
-          phone: req.Phone || req.phone || '',
-          source: 'join_request'
-        };
-
-        membersMap.set(key, memberRecord);
-      });
-
-      // C. Add pending join requests (NEW SECTION REQUESTED BY USER)
-      inProgressJoinRequests.forEach((req: any) => {
-        const name = String(req.FullName || req.fullName || req.Name || req.name || 'Applicant').trim();
-        const email = String(req.Email || req.email || '').trim();
-        const key = String(email || name || '').toLowerCase();
-
-        // Calculate age from DOB if age not provided
-        let derivedAge = String(req.Age || req.age || '');
-        const dobStr = req.DOB || req.dob;
-        if (!derivedAge && dobStr) {
-          try {
-            const birthYear = new Date(dobStr).getFullYear();
-            if (!isNaN(birthYear)) {
-              derivedAge = String(new Date().getFullYear() - birthYear);
-            }
-          } catch (e) {}
-        }
-
-        const memberRecord: DisplayMember = {
-          id: String(req["Id.No"] || req.IdNo || req.id || `REQ-${idCounter++}`),
-          name: name,
-          role: 'Membership Applicant',
-          age: derivedAge || '',
-          dob: dobStr || '',
-          qualification: req.Qualification || req.qualification || req.Education || req.education || 'Pending Review',
-          motivation: req.Reason || req.reason || req.Motivation || req.motivation || 'Applying to join PHDY village development group.',
-          image: req.PhotoUrl || req.photoUrl || req.Photo || req.ImageURL || req.image || 'https://cdn-icons-png.flaticon.com/128/17798/17798443.png',
-          status: 'In Progress',
-          statusLabel: 'In progress',
-          address: req.Address || req.address || 'Pedda Harivanam',
-          email: email,
-          phone: req.Phone || req.phone || '',
-          source: 'join_request_pending'
-        };
-
-        if (!membersMap.has(key)) {
-          membersMap.set(key, memberRecord);
-        }
-      });
-
-      // D. Also incorporate active users who have member roles
-      activeUsers.forEach((u: any) => {
-        const name = String(u.Name || u.name || '').trim();
-        const email = String(u.Email || u.email || '').trim();
-        const key = String(email || name || '').toLowerCase();
-        
-        if (key && !membersMap.has(key)) {
-          const roleRaw = String(u.Role || u.role || 'phdy_member').toLowerCase();
-          const displayRole = roleRaw === 'admin' ? 'Administrator' :
-                              roleRaw === 'treasurer' ? 'Treasurer' : 'PHDY Member';
-
-          membersMap.set(key, {
-            id: `PHDY-${idCounter++}`,
-            name: name || email.split('@')[0],
-            role: displayRole,
-            age: '',
-            qualification: 'Active Contributor',
-            motivation: 'Volunteering for Pedda Harivanam village youth and community initiatives.',
-            image: u.ImageURL || u.image || 'https://cdn-icons-png.flaticon.com/128/17798/17798443.png',
-            status: 'Approved',
-            statusLabel: 'Approved User',
-            address: 'Pedda Harivanam',
-            email: email,
-            source: 'user'
-          });
-        }
-      });
-
-      // Sort: legacy members first by numeric ID, followed by approved join requests
-      const sortedList = Array.from(membersMap.values()).sort((a, b) => {
-        const idA = parseInt(a.id.replace(/\D/g, '')) || 9999;
-        const idB = parseInt(b.id.replace(/\D/g, '')) || 9999;
-        return idA - idB;
-      });
-
-      setMembers(sortedList);
+      setMembers(list);
     } catch (err) {
-      console.error("Error loading members:", err);
+      console.error('Error fetching members:', err);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchAllMembers();
-
-    // Listen for events from join request approvals or submissions
-    const handleSync = () => {
-      fetchAllMembers();
-    };
-
-    window.addEventListener('phdy_members_updated', handleSync);
-    window.addEventListener('phdy_join_requests_updated', handleSync);
-
-    return () => {
-      window.removeEventListener('phdy_members_updated', handleSync);
-      window.removeEventListener('phdy_join_requests_updated', handleSync);
-    };
+    fetchMembers();
   }, []);
 
   const filteredMembers = useMemo(() => {
-    const search = String(searchTerm || '').toLowerCase().trim();
-    return members.filter(m => {
-      const name = String(m?.name || '').toLowerCase();
-      const qualification = String(m?.qualification || '').toLowerCase();
-      const address = String(m?.address || '').toLowerCase();
-      const role = String(m?.role || '').toLowerCase();
-
+    return members.filter((m) => {
       const matchesSearch = 
-        !search ||
-        name.includes(search) ||
-        qualification.includes(search) ||
-        address.includes(search) ||
-        role.includes(search);
+        m.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        m.membershipNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        m.qualification.toLowerCase().includes(searchTerm.toLowerCase());
 
       if (!matchesSearch) return false;
 
-      if (activeFilter === 'all') return m.status === 'Approved';
-      if (activeFilter === 'approved') return (m.source === 'join_request' || m.source === 'user') && m.status === 'Approved';
-      if (activeFilter === 'founding') return m.source === 'legacy';
-      if (activeFilter === 'join_requests') return m.status === 'In Progress';
+      if (activeFilter === 'official') return !m.isFounding;
+      if (activeFilter === 'founding') return m.isFounding;
       return true;
     });
   }, [members, searchTerm, activeFilter]);
 
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 space-y-4">
-        <div className="animate-spin rounded-full h-12 w-12 border-4 border-orange-100 border-t-orange-600"></div>
-        <p className="text-orange-600 font-bold animate-pulse text-xs tracking-widest uppercase">
-          Loading Approved Members...
-        </p>
-      </div>
-    );
-  }
-
-  const approvedCount = members.filter(m => m.status === 'Approved').length;
-  const joinRequestApprovedCount = members.filter(m => (m.source === 'join_request' || m.source === 'user') && m.status === 'Approved').length;
-  const inProgressCount = members.filter(m => m.status === 'In Progress').length;
-  const foundingCount = members.filter(m => m.source === 'legacy').length;
+  const officialCount = members.filter(m => !m.isFounding).length;
+  const foundingCount = members.filter(m => m.isFounding).length;
 
   return (
-    <div className="space-y-8">
-      {/* Controls Bar: Search & Filter Tabs */}
-      <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 sm:p-6 rounded-[28px] border border-orange-100 shadow-sm">
-        <div className="flex items-center gap-2 flex-wrap w-full md:w-auto">
-          <button
-            type="button"
-            onClick={() => setActiveFilter('all')}
-            className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
-              activeFilter === 'all'
-                ? 'bg-orange-600 text-white shadow-md shadow-orange-600/20'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            All Members ({approvedCount})
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveFilter('approved')}
-            className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 ${
-              activeFilter === 'approved'
-                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
-                : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-100'
-            }`}
-          >
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            Approved Applicants ({joinRequestApprovedCount})
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveFilter('founding')}
-            className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 ${
-              activeFilter === 'founding'
-                ? 'bg-gray-900 text-white shadow-md'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            Founding Team ({foundingCount})
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveFilter('join_requests')}
-            className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 ${
-              activeFilter === 'join_requests'
-                ? 'bg-amber-500 text-white shadow-md shadow-amber-500/20'
-                : 'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-100'
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5" />
-            Join Requests ({inProgressCount})
-          </button>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-fadeIn">
+      
+      {/* Header section */}
+      <div className="text-center max-w-3xl mx-auto mb-10">
+        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-orange-100 text-orange-800 text-xs font-black uppercase tracking-wider mb-3 shadow-sm">
+          <Award className="w-4 h-4 text-orange-600" />
+          <span>Official Members Directory</span>
         </div>
+        <h2 className="text-3xl sm:text-4xl font-black text-gray-950 tracking-tight">
+          Pedda Harivanam Youth Members
+        </h2>
+        <p className="mt-3 text-sm sm:text-base text-gray-600 leading-relaxed">
+          Meet the officially approved members and founding leaders driving social progress, education, and development across Pedda Harivanam.
+        </p>
+      </div>
 
-        <div className="relative w-full md:w-72">
+      {/* Controls: Search & Tabs */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-8">
+        
+        {/* Search Input */}
+        <div className="relative w-full sm:w-80">
           <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search member, role, or qualification..."
+            placeholder="Search by name, ID or qualification..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-gray-50 border border-gray-200 text-xs font-medium text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+            className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent shadow-sm"
           />
+        </div>
+
+        {/* Filter Badges */}
+        <div className="flex items-center gap-1.5 p-1 bg-gray-100 rounded-xl w-full sm:w-auto justify-center sm:justify-start">
+          <button
+            onClick={() => setActiveFilter('all')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              activeFilter === 'all' 
+                ? 'bg-white text-orange-600 shadow-sm' 
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            All Members ({members.length})
+          </button>
+          <button
+            onClick={() => setActiveFilter('official')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              activeFilter === 'official' 
+                ? 'bg-white text-orange-600 shadow-sm' 
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Official Verified ({officialCount})
+          </button>
+          <button
+            onClick={() => setActiveFilter('founding')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              activeFilter === 'founding' 
+                ? 'bg-white text-orange-600 shadow-sm' 
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Founding Team ({foundingCount})
+          </button>
         </div>
       </div>
 
-      {/* Members Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-8">
-        {filteredMembers.map((member) => (
-          <div 
-            key={member.id + member.name} 
-            className="group bg-white rounded-2xl sm:rounded-[32px] overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-500 border border-gray-100 flex flex-col transform hover:-translate-y-1 sm:hover:-translate-y-2"
-          >
-            {/* Member Image Header */}
-            <div className="relative h-52 sm:h-72 overflow-hidden bg-gray-50 flex items-center justify-center p-3">
-              <div className="absolute inset-0 bg-gradient-to-br from-orange-50 to-white opacity-40"></div>
-              
-              {/* Status Badge Overlaid on Image */}
-              <div className="absolute top-3 left-3 z-20 flex items-center gap-1.5 px-3 py-1 bg-white/95 backdrop-blur-sm border border-emerald-200 rounded-full shadow-sm">
-                <span className={`w-2 h-2 rounded-full animate-pulse ${member.status === 'Approved' ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
-                <span className={`text-[10px] font-black uppercase tracking-wider flex items-center gap-1 ${member.status === 'Approved' ? 'text-emerald-800' : 'text-amber-800'}`}>
-                  {member.status === 'Approved' ? (
-                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                  ) : (
-                    <Clock className="w-3 h-3 text-amber-600" />
-                  )}
-                  {member.statusLabel || `Status: ${member.status}`}
-                </span>
-              </div>
-
-              {/* ID Badge */}
-              <div className="absolute top-3 right-3 z-20 px-2.5 py-1 bg-gray-900/80 backdrop-blur-sm text-white rounded-full text-[9px] font-mono font-bold tracking-wider">
-                #{member.id}
-              </div>
-
-              <img 
-                src={member.image} 
-                alt={member.name} 
-                className="relative z-10 max-w-full max-h-full object-contain rounded-xl sm:rounded-2xl transition-transform duration-700 group-hover:scale-105"
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement;
-                  target.src = 'https://cdn-icons-png.flaticon.com/128/17798/17798443.png';
-                }}
-              />
+      {/* Loading state */}
+      {loading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+          {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+            <div key={n} className="bg-white rounded-3xl p-5 border border-gray-100 shadow-sm animate-pulse space-y-4">
+              <div className="w-full h-48 bg-gray-200 rounded-2xl"></div>
+              <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+              <div className="h-3 bg-gray-200 rounded w-1/2"></div>
             </div>
+          ))}
+        </div>
+      ) : filteredMembers.length === 0 ? (
+        <div className="bg-white rounded-3xl p-12 text-center border border-gray-200 max-w-md mx-auto">
+          <User className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+          <h3 className="text-base font-bold text-gray-800">No Members Found</h3>
+          <p className="text-xs text-gray-500 mt-1">Try adjusting your search terms or filter selection.</p>
+        </div>
+      ) : (
+        /* Members Cards Grid */
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+          {filteredMembers.map((member) => (
+            <div 
+              key={member.id}
+              className="bg-white rounded-3xl overflow-hidden border border-gray-200 hover:border-orange-300 hover:shadow-xl transition-all duration-300 flex flex-col group"
+            >
+              {/* Photo Area */}
+              <div className="relative w-full h-56 bg-slate-100 overflow-hidden">
+                <img 
+                  src={member.image} 
+                  alt={member.name} 
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  onError={(e) => {
+                    // Fallback on broken image link
+                    (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80';
+                  }}
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent"></div>
 
-            {/* Member Info Body */}
-            <div className="p-4 sm:p-6 flex-grow flex flex-col space-y-3 sm:space-y-4">
-              <div>
-                <span className="text-[10px] font-bold text-orange-600 uppercase tracking-widest block mb-0.5">
-                  {member.role}
-                </span>
-                <h3 className="text-base sm:text-xl font-black text-gray-900 line-clamp-1">
-                  {member.name}
-                </h3>
-              </div>
-
-              {/* Quick Details Row */}
-              <div className="grid grid-cols-2 gap-2 text-[10px] sm:text-xs border-t border-gray-100 pt-3">
-                <div className="bg-gray-50/80 p-2 rounded-xl">
-                  <span className="text-gray-400 uppercase text-[8px] sm:text-[9px] font-bold tracking-wider block">
-                    {member.age ? 'Age' : 'Status'}
-                  </span>
-                  <span className="text-gray-900 font-bold">
-                    {member.age ? `${member.age} Yrs` : 'Approved'}
+                {/* Membership Badge */}
+                <div className="absolute top-3 left-3">
+                  <span className="px-2.5 py-1 bg-white/95 backdrop-blur-md text-orange-950 text-[10px] font-black uppercase tracking-wider rounded-lg shadow-sm font-mono border border-orange-100">
+                    {member.membershipNumber}
                   </span>
                 </div>
-                <div className="bg-gray-50/80 p-2 rounded-xl text-right">
-                  <span className="text-gray-400 uppercase text-[8px] sm:text-[9px] font-bold tracking-wider block">
-                    Education
-                  </span>
-                  <span className="text-gray-900 font-bold truncate block">
-                    {member.qualification || 'Nill'}
+
+                <div className="absolute top-3 right-3">
+                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                    member.isFounding 
+                      ? 'bg-amber-500 text-white shadow-sm' 
+                      : 'bg-emerald-500 text-white shadow-sm'
+                  }`}>
+                    {member.isFounding ? 'Founding' : 'Official'}
                   </span>
                 </div>
-              </div>
 
-              {/* Address / Location Tag */}
-              {member.address && (
-                <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                  <MapPin className="w-3.5 h-3.5 text-orange-500 flex-shrink-0" />
-                  <span className="truncate">{member.address}</span>
-                </div>
-              )}
-
-              {/* Motivation Box */}
-              <div className="flex-grow">
-                <span className="text-gray-400 uppercase text-[9px] font-bold block mb-1.5 tracking-wider">
-                  Motivation & Commitment
-                </span>
-                <div className="bg-orange-50/40 p-3.5 rounded-2xl border border-orange-100/60 min-h-[85px] flex items-start">
-                  <p className="text-gray-700 text-xs italic leading-relaxed line-clamp-3">
-                    "{member.motivation}"
+                {/* Bottom title inside image */}
+                <div className="absolute bottom-3 left-3 right-3 text-white">
+                  <h3 className="font-black text-base tracking-tight truncate drop-shadow-sm">
+                    {member.name}
+                  </h3>
+                  <p className="text-[11px] text-orange-200 font-bold truncate drop-shadow-sm">
+                    {member.role}
                   </p>
                 </div>
               </div>
-            </div>
 
-            {/* Card Footer */}
-            <div className="px-4 sm:px-6 py-3 border-t border-gray-100 flex justify-between items-center bg-gray-50/40">
-              <span className="text-[8px] sm:text-[10px] font-bold text-gray-400 tracking-widest uppercase flex items-center gap-1.5">
-                <UserCheck className="w-3 h-3 text-emerald-600" />
-                Verified PHDY Youth
-              </span>
-              <div className="flex space-x-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
-                <div className="w-1.5 h-1.5 rounded-full bg-orange-400"></div>
+              {/* Card Details */}
+              <div className="p-4 space-y-2 flex-grow flex flex-col justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs text-gray-500">
+                    <span className="font-semibold text-gray-400">Qualification:</span>
+                    <span className="font-bold text-gray-800 text-right truncate max-w-[140px]">
+                      {member.qualification}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-gray-500">
+                    <span className="font-semibold text-gray-400">Joined Date:</span>
+                    <span className="font-bold text-gray-700">
+                      {member.joinedDate}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-[10px] text-emerald-700 font-bold">
+                  <span className="flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>Verified Member</span>
+                  </span>
+                  <span className="text-gray-400">Pedda Harivanam</span>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
-      </div>
-
-      {filteredMembers.length === 0 && (
-        <div className="bg-white rounded-3xl p-12 text-center border border-gray-100 shadow-sm">
-          <p className="text-gray-500 font-bold text-sm mb-1">No matching members found</p>
-          <p className="text-xs text-gray-400 mb-4">Try adjusting your search term or filter.</p>
-          <button
-            onClick={() => { setSearchTerm(''); setActiveFilter('all'); }}
-            className="px-4 py-2 bg-orange-600 text-white rounded-xl text-xs font-bold uppercase tracking-wider"
-          >
-            Clear Filters
-          </button>
+          ))}
         </div>
       )}
     </div>
