@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
+import { supabase, isSupabaseConfigured, getAuthRedirectUrl } from '../lib/supabaseClient';
 import { LoggedInUser, Page } from '../App';
 import { ShieldCheck, Lock, Mail, User, KeyRound, ArrowLeft, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 
@@ -100,7 +100,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ loggedInUser, onLoginSucce
             if (error) {
               // If email not confirmed or invalid login credentials
               if (error.message.includes("Email not confirmed")) {
-                throw new Error("Your email address has not been confirmed yet. Please check your inbox or contact the Administrator.");
+                throw new Error("Your email address has not been confirmed yet. Please check your inbox (and spam folder) and click the confirmation link to activate your account.");
               }
               if (error.message.includes("Invalid login credentials")) {
                 throw new Error("Incorrect email or password. Please verify your credentials or reset your password.");
@@ -117,30 +117,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({ loggedInUser, onLoginSucce
               } else if (userRole === 'phdy_member' || userRole === 'treasurer') {
                 onNavigate('internal');
               } else {
-                setAuthSuccess("Logged in successfully! Your account is currently pending Administrator approval for PHDY Member internal access.");
+                setAuthSuccess("Logged in successfully as standard user! Welcome to PHDY.");
+                onNavigate('dashboard');
               }
               setIsAuthenticating(false);
               return;
             }
           } catch (supaErr: any) {
-            // Check fallback local registered users directory
-            const savedUsers: any[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
-            const found = savedUsers.find(u => String(u.email || '').toLowerCase().trim() === inputEmail);
-            
-            if (found) {
-              if (found.password && found.password !== inputPass) {
-                throw new Error("Incorrect password. Please verify your credentials or use Forgot Password.");
-              }
-              if (found.status === 'Pending Approval') {
-                throw new Error("Your account is currently pending Administrator review and approval.");
-              }
-              const role = found.role || 'user';
-              onLoginSuccess({ email: inputEmail, role });
-              if (role === 'admin') onNavigate('admin');
-              else if (role === 'phdy_member' || role === 'treasurer') onNavigate('internal');
-              else onNavigate('home');
-              setIsAuthenticating(false);
-              return;
+            // Strictly enforce email confirmation & invalid credentials from Supabase - DO NOT bypass!
+            if (
+              supaErr.message?.includes("not been confirmed") || 
+              supaErr.message?.includes("Email not confirmed") ||
+              supaErr.message?.includes("Invalid login credentials")
+            ) {
+              throw supaErr;
             }
             throw new Error(supaErr.message || "Invalid credentials or account not registered.");
           }
@@ -155,15 +145,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ loggedInUser, onLoginSucce
           if (found.password && found.password !== inputPass) {
             throw new Error("Incorrect password. Please try again.");
           }
-          if (found.status === 'Pending Approval') {
-            throw new Error("Your account is currently pending Administrator approval.");
+          if (found.status === 'Blocked') {
+            throw new Error("Your account has been suspended by the Administrator.");
           }
 
           const role = found.role || 'user';
           onLoginSuccess({ email: inputEmail, role });
           if (role === 'admin') onNavigate('admin');
           else if (role === 'phdy_member' || role === 'treasurer') onNavigate('internal');
-          else onNavigate('home');
+          else onNavigate('dashboard');
         }
       }
 
@@ -177,7 +167,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ loggedInUser, onLoginSucce
         if (inputPass !== loginData.confirmPassword) throw new Error("Passwords do not match.");
 
         const regEmail = inputEmail;
-        const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/#login` : undefined;
+        const redirectUrl = getAuthRedirectUrl('#login');
 
         let supaRegistered = false;
         if (isSupabaseConfigured()) {
@@ -209,13 +199,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ loggedInUser, onLoginSucce
           }
         }
 
-        // Store registration in local pending directory
+        // Store registration in local directory as active standard user
         const newRegUser = {
           name: loginData.name.trim(),
           email: regEmail,
           role: 'user',
           joinedDate: new Date().toISOString().split('T')[0],
-          status: 'Pending Approval',
+          status: 'Active',
           password: inputPass
         };
 
@@ -224,7 +214,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ loggedInUser, onLoginSucce
         filtered.unshift(newRegUser);
         localStorage.setItem('phdy_registered_users_list', JSON.stringify(filtered));
 
-        setAuthSuccess("Registration submitted successfully! Your account has been sent to the Administrator for approval as a PHDY Member.");
+        setAuthSuccess("Registration successful! Please check your email inbox and click the confirmation link to activate your account. Once verified, you can sign in directly.");
         setAuthMode('login');
         setLoginData(prev => ({ ...prev, password: '', confirmPassword: '' }));
       }
@@ -237,7 +227,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ loggedInUser, onLoginSucce
           throw new Error("Please enter your registered email address.");
         }
 
-        const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/#login` : undefined;
+        const redirectUrl = getAuthRedirectUrl('#login');
 
         if (isSupabaseConfigured()) {
           const { error } = await supabase.auth.resetPasswordForEmail(inputEmail, {
@@ -249,7 +239,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ loggedInUser, onLoginSucce
           }
         }
 
-        setAuthSuccess(`Password reset request processed for ${inputEmail}. If registered, you will receive a reset link.`);
+        setAuthSuccess(`Password reset request sent to ${inputEmail}. Please check your inbox for the reset link to choose a new password.`);
         setAuthMode('login');
       }
 
@@ -440,9 +430,38 @@ export const LoginPage: React.FC<LoginPageProps> = ({ loggedInUser, onLoginSucce
           )}
 
           {authError && (
-            <div className="p-4 bg-red-50 text-red-700 rounded-2xl text-xs font-semibold border border-red-100 flex items-start gap-2 animate-fadeIn">
-              <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-              <span>{authError}</span>
+            <div className="p-4 bg-red-50 text-red-700 rounded-2xl text-xs font-semibold border border-red-100 space-y-2 animate-fadeIn">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                <span>{authError}</span>
+              </div>
+              {authError.includes('not been confirmed') && loginData.email && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      setIsAuthenticating(true);
+                      const { error } = await supabase.auth.resend({
+                        type: 'signup',
+                        email: loginData.email.trim().toLowerCase(),
+                        options: {
+                          emailRedirectTo: getAuthRedirectUrl('#login')
+                        }
+                      });
+                      if (error) throw error;
+                      setAuthError('');
+                      setAuthSuccess(`A fresh confirmation email has been dispatched to ${loginData.email}. Please check your inbox and spam folder.`);
+                    } catch (err: any) {
+                      setAuthError(err.message || 'Failed to resend confirmation email.');
+                    } finally {
+                      setIsAuthenticating(false);
+                    }
+                  }}
+                  className="mt-2 text-xs font-bold text-orange-700 underline hover:text-orange-900 block"
+                >
+                  Resend Confirmation Email &rarr;
+                </button>
+              )}
             </div>
           )}
 

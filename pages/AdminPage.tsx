@@ -36,7 +36,8 @@ import {
   isSupabaseConfigured, 
   supabase, 
   membershipService, 
-  villageAccountingService 
+  villageAccountingService,
+  getAuthRedirectUrl
 } from '../lib/supabaseClient';
 
 const CLOUDINARY_CLOUD_NAME = 'dbohmpxko';
@@ -727,6 +728,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
               email: regEmail,
               password: inputPass,
               options: {
+                emailRedirectTo: getAuthRedirectUrl('#login'),
                 data: {
                   name: (loginData.name || '').trim(),
                   role: assignedRole
@@ -769,7 +771,9 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
 
         if (isSupabaseConfigured()) {
           try {
-            await supabase.auth.resetPasswordForEmail(inputEmail);
+            await supabase.auth.resetPasswordForEmail(inputEmail, {
+              redirectTo: getAuthRedirectUrl('#login')
+            });
           } catch (e) {}
         }
 
@@ -1003,7 +1007,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       if (!finalEmail) return; // User cancelled
     }
     const finalEmailLower = String(finalEmail || '').toLowerCase().trim();
-    if (!window.confirm(`Are you sure you want to APPROVE ${req.fullName}? Their request status will be marked "Approved" (removed from active Join Requests) and their details will be added to the "Users" list.`)) return;
+    if (!window.confirm(`Are you sure you want to APPROVE ${req.fullName}? Their request status will be updated to "Approved" in the database, added to the Members Directory, and an automated activation email will be sent to them.`)) return;
 
     setProcessingRequest(req.fullName);
     try {
@@ -1029,16 +1033,13 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         localStorage.setItem('phdy_join_requests_cache', JSON.stringify(updated));
       } catch (e) {}
 
-      // 2. Add approved details to "Users" list with generated initial password!
-      const generatedPass = `PHDY@${Math.floor(1000 + Math.random() * 9000)}`;
-
+      // 2. Add approved details to Users list
       const newUserRecord: SystemUserRecord = {
         name: req.fullName || finalEmailLower.split('@')[0],
         email: finalEmailLower,
         role: 'Phdy_member',
         joinedDate: new Date().toISOString().split('T')[0],
-        status: 'Active',
-        password: generatedPass
+        status: 'Active'
       };
 
       setSpreadsheetUsers(prev => {
@@ -1053,37 +1054,62 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         localStorage.setItem('phdy_registered_users_list', JSON.stringify(filtered));
       } catch (e) {}
 
-      // 3. Save approval to Supabase database
+      // 3. Save approval directly to Supabase database (membership_requests and members_directory)
+      let supaUpdated = false;
       if (isSupabaseConfigured()) {
         try {
+          // Update membership_requests by ID, Email, or Phone to guarantee database record update
           if (req.id) {
-            await membershipService.updateRequestStatus(req.id, 'Approved');
+            const { error: err1 } = await supabase.from('membership_requests').update({ status: 'Approved' }).eq('id', req.id);
+            if (!err1) supaUpdated = true;
           }
-          await membershipService.addMember({
-            name: req.fullName,
+          if (finalEmailLower) {
+            const { error: err2 } = await supabase.from('membership_requests').update({ status: 'Approved' }).eq('email', finalEmailLower);
+            if (!err2) supaUpdated = true;
+          }
+          if (req.phone) {
+            await supabase.from('membership_requests').update({ status: 'Approved' }).eq('phone', req.phone);
+          }
+
+          // Add to members_directory
+          await supabase.from('members_directory').insert([{
+            name: req.fullName || finalEmailLower.split('@')[0],
             role: 'Active Member',
-            mobile: req.phone || '',
-            photo_url: req.photoUrl || ''
-          });
+            qualification: req.education || req.dob || 'Member',
+            mobile: req.phone || null,
+            photo_url: req.photoUrl || req.photo_url || null,
+            is_active: true
+          }]);
+
+          // Automatically send activation / password setup email to the approved user
+          if (finalEmailLower) {
+            try {
+              await supabase.auth.resetPasswordForEmail(finalEmailLower, {
+                redirectTo: getAuthRedirectUrl('#login')
+              });
+            } catch (mailErr) {
+              console.warn("[Supabase Email Dispatch]:", mailErr);
+            }
+          }
         } catch (supaErr) {
           console.warn("[Supabase] Join request approval notice:", supaErr);
         }
       }
 
-      // 4. Open credentials delivery modal for admin
+      // 4. Open clean confirmation modal for admin (no password shown)
       setApprovedCredentials({
         name: req.fullName || 'Member',
         email: finalEmailLower,
         phone: req.phone || '',
         role: 'PHDY Member',
-        password: generatedPass
+        password: ''
       });
 
-      fetchSpreadsheetJoinRequests();
-      fetchSpreadsheetUsers();
-      fetchSpreadsheetMembers();
+      await fetchSpreadsheetJoinRequests();
+      await fetchSpreadsheetUsers();
+      await fetchSpreadsheetMembers();
     } catch (err: any) {
-      alert(`Processed locally: ${err.message || 'Complete'}`);
+      alert(`Approval processed: ${err.message || 'Complete'}`);
     } finally {
       setProcessingRequest(null);
     }
@@ -2558,7 +2584,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         </div>
       </div>
       
-      {/* Approved Member Credentials Delivery Modal */}
+      {/* Approved Member Confirmation Modal (No Password Displayed) */}
       {approvedCredentials && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 backdrop-blur-sm p-4 animate-fadeIn">
           <div className="bg-white rounded-[32px] p-6 md:p-8 max-w-md w-full shadow-2xl border border-gray-100">
@@ -2568,7 +2594,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
               </div>
               <h3 className="text-xl font-black text-gray-900 uppercase tracking-tight">Member Approved!</h3>
               <p className="text-xs text-gray-500 mt-1">
-                Added to <strong>Members Directory</strong>. Send the login credentials to the user below:
+                Application status updated to <strong>&quot;Approved&quot;</strong> in database and added to <strong>Members Directory</strong>.
               </p>
             </div>
 
@@ -2578,61 +2604,48 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                 <span className="font-black text-gray-900">{approvedCredentials.name}</span>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-gray-200/60">
-                <span className="font-bold text-gray-400 uppercase text-[10px]">Username / Email</span>
+                <span className="font-bold text-gray-400 uppercase text-[10px]">Email Address</span>
                 <span className="font-bold font-mono text-gray-800">{approvedCredentials.email}</span>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-gray-200/60">
-                <span className="font-bold text-gray-400 uppercase text-[10px]">Initial Password</span>
-                <span className="font-black font-mono text-orange-600 text-sm bg-orange-50 px-2 py-0.5 rounded border border-orange-200">
-                  {approvedCredentials.password}
-                </span>
-              </div>
-              <div className="flex justify-between items-center py-1">
-                <span className="font-bold text-gray-400 uppercase text-[10px]">Access Role</span>
+                <span className="font-bold text-gray-400 uppercase text-[10px]">Membership Role</span>
                 <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 text-[10px]">
                   {approvedCredentials.role}
                 </span>
               </div>
+              <div className="flex justify-between items-center py-1">
+                <span className="font-bold text-gray-400 uppercase text-[10px]">Automated Email</span>
+                <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200 text-[10px]">
+                  ✉️ Activation Email Dispatched
+                </span>
+              </div>
+            </div>
+
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 text-xs text-emerald-900 mb-5 leading-relaxed">
+              <p className="font-bold mb-0.5">🔒 Private Password Security:</p>
+              <p className="text-[11px] text-emerald-800">
+                The user has received an automated email link to set their own secure password and log into the PHDY portal.
+              </p>
             </div>
 
             <div className="space-y-2.5">
-              <button
-                type="button"
-                onClick={() => {
-                  const text = `Welcome to Pedda Harivanam Youth (PHDY)!\n\nYour membership request has been APPROVED.\n\nHere are your login details:\n• Portal URL: ${window.location.origin}/#login\n• Username / Email: ${approvedCredentials.email}\n• Temporary Password: ${approvedCredentials.password}\n\nPlease sign in and set your personal password.`;
-                  navigator.clipboard.writeText(text);
-                  setCopiedCreds(true);
-                  setTimeout(() => setCopiedCreds(false), 3000);
-                }}
-                className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-md shadow-indigo-100"
-              >
-                <span>{copiedCreds ? '✅ Credentials Copied to Clipboard!' : '📋 Copy Login Details to Clipboard'}</span>
-              </button>
-
-              <div className="grid grid-cols-2 gap-2">
+              {approvedCredentials.phone && (
                 <a
-                  href={`https://api.whatsapp.com/send?${approvedCredentials.phone ? `phone=91${approvedCredentials.phone.replace(/\D/g, '')}&` : ''}text=${encodeURIComponent(`Hello ${approvedCredentials.name},\n\nYour PHDY membership application is APPROVED!\n\nPortal: ${window.location.origin}/#login\nEmail: ${approvedCredentials.email}\nPassword: ${approvedCredentials.password}`)}`}
+                  href={`https://api.whatsapp.com/send?phone=91${approvedCredentials.phone.replace(/\D/g, '')}&text=${encodeURIComponent(`Hello ${approvedCredentials.name},\n\nCongratulations! Your PHDY Membership application has been APPROVED by the Administrator.\n\nAn activation email has been sent to ${approvedCredentials.email} to activate your account.\n\nPortal: https://phdy.vercel.app/#login\n\nPedda Harivanam Youth (PHDY)`)}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs uppercase tracking-wider text-center transition-all flex items-center justify-center gap-1"
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs uppercase tracking-wider text-center transition-all flex items-center justify-center gap-1.5 shadow-sm"
                 >
-                  <span>📲 Send WhatsApp</span>
+                  <span>📲 Notify on WhatsApp</span>
                 </a>
-
-                <a
-                  href={`mailto:${approvedCredentials.email}?subject=${encodeURIComponent("PHDY Membership Approved - Login Credentials")}&body=${encodeURIComponent(`Hello ${approvedCredentials.name},\n\nYour membership application has been approved!\n\nHere are your portal credentials:\nWebsite: ${window.location.origin}/#login\nEmail: ${approvedCredentials.email}\nTemporary Password: ${approvedCredentials.password}\n\nRegards,\nPedda Harivanam Youth Team`)}`}
-                  className="py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl font-bold text-xs uppercase tracking-wider text-center transition-all flex items-center justify-center gap-1"
-                >
-                  <span>✉️ Send Email</span>
-                </a>
-              </div>
+              )}
 
               <button
                 type="button"
                 onClick={() => setApprovedCredentials(null)}
-                className="w-full py-2.5 text-gray-500 hover:text-gray-800 font-bold text-xs transition-colors"
+                className="w-full py-2.5 bg-slate-900 hover:bg-black text-white rounded-xl font-bold text-xs uppercase tracking-wider transition-colors"
               >
-                Close & Return
+                Done
               </button>
             </div>
           </div>

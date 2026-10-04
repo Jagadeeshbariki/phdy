@@ -1,4 +1,5 @@
 import { supabase } from '../services/supabase';
+import { getAuthRedirectUrl } from '../lib/supabaseClient';
 
 export interface UserProfile {
   id: string;
@@ -41,7 +42,7 @@ export const authService = {
     fullName: string;
     phone?: string;
   }) {
-    const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/#login` : undefined;
+    const redirectUrl = getAuthRedirectUrl('#login');
     const { data, error } = await supabase.auth.signUp({
       email: email.trim().toLowerCase(),
       password,
@@ -81,7 +82,7 @@ export const authService = {
     occupation?: string;
     reasonToJoin?: string;
   }) {
-    const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/#login` : undefined;
+    const redirectUrl = getAuthRedirectUrl('#login');
     
     // Step 1: Sign up user
     const { data: authData, error: authError } = await supabase.auth.signUp({

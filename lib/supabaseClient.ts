@@ -17,6 +17,24 @@ export const cleanSupabaseUrl = (url: string): string => {
   }
 };
 
+// Returns production redirect URL so confirmation/reset links direct to phdy.vercel.app
+export const getAuthRedirectUrl = (route: string = '#login'): string => {
+  const cleanRoute = route.startsWith('/') ? route.slice(1) : route;
+  
+  if (typeof window === 'undefined') {
+    return `https://phdy.vercel.app/${cleanRoute}`;
+  }
+
+  const hostname = window.location.hostname;
+  // If already running on production domain or custom domain
+  if (hostname.includes('phdy.vercel.app') || hostname.includes('phdy.org')) {
+    return `${window.location.origin}/${cleanRoute}`;
+  }
+
+  // Always route auth verification links to production domain
+  return `https://phdy.vercel.app/${cleanRoute}`;
+};
+
 // Retrieve environment variables with fallback
 const getRawEnvConfig = () => {
   const metaEnv = (import.meta as any).env || {};
