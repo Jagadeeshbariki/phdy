@@ -368,70 +368,40 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         }
       }
 
-      // Load locally cached requests
-      let cachedRequests: any[] = [];
-      try {
-        const saved = localStorage.getItem('phdy_join_requests_cache');
-        if (saved) cachedRequests = JSON.parse(saved);
-      } catch (e) {}
+      // Map Supabase membership_requests directly
+      const formattedList = supaRequests.map(r => {
+        const fullName = r.profiles?.full_name || r.full_name || r.fullName || 'Applicant';
+        const email = r.profiles?.email || r.email || '';
+        const phone = r.phone || '';
+        const qualification = r.qualification || '';
+        const reason = r.reason_to_join || r.motivation || r.reason || '';
+        const photoUrl = r.photo_url || r.photoUrl || '';
+        // Normalize status
+        let rawStatus = r.status || 'pending';
+        let status = 'In Progress';
+        if (rawStatus.toLowerCase() === 'approved' || rawStatus.toLowerCase() === 'active') {
+          status = 'Approved';
+        } else if (rawStatus.toLowerCase() === 'rejected') {
+          status = 'Rejected';
+        } else {
+          status = 'In Progress';
+        }
+        const date = r.submitted_at || r.created_at || '';
 
-      const reqMap = new Map<string, any>();
+        return {
+          id: r.id,
+          fullName,
+          email,
+          phone,
+          qualification,
+          reason,
+          photoUrl,
+          status,
+          date
+        };
+      });
 
-      // Populate cached requests first
-      if (Array.isArray(cachedRequests)) {
-        cachedRequests.forEach(r => {
-          if (r) {
-            const key = String(r.email || r.fullName || '').toLowerCase().trim();
-            if (key) {
-              const rawStatus = r.Status || r.status || r['Request Status'] || r.RequestStatus || '';
-              reqMap.set(key, {
-                ...r,
-                status: normalizeStatus(rawStatus)
-              });
-            }
-          }
-        });
-      }
-
-      // Populate / merge Supabase records
-      if (Array.isArray(supaRequests)) {
-        supaRequests.forEach(r => {
-          if (r) {
-            const fullName = r.full_name || r.fullName || '';
-            const email = r.email || '';
-            const phone = r.phone || '';
-            const address = r.address || '';
-            const reason = r.motivation || r.reason || '';
-            const photoUrl = r.photo_url || r.photoUrl || '';
-            const status = r.status === 'Approved' ? 'Approved' : (r.status === 'Rejected' ? 'Rejected' : 'In Progress');
-            const date = r.submitted_at || r.date || '';
-
-            const key = String(email || fullName).toLowerCase().trim();
-            if (key) {
-              const existing = reqMap.get(key);
-              reqMap.set(key, {
-                id: r.id || existing?.id,
-                fullName: fullName || existing?.fullName || 'Applicant',
-                email: email || existing?.email || '',
-                phone: phone || existing?.phone || '',
-                dob: r.dob || existing?.dob || '',
-                address: address || existing?.address || '',
-                reason: reason || existing?.reason || '',
-                photoUrl: photoUrl || existing?.photoUrl || '',
-                status: status || existing?.status || 'In Progress',
-                date: date || existing?.date || ''
-              });
-            }
-          }
-        });
-      }
-
-      const mergedList = Array.from(reqMap.values());
-      try {
-        localStorage.setItem('phdy_join_requests_cache', JSON.stringify(mergedList));
-      } catch (e) {}
-
-      setSpreadsheetJoinRequests(mergedList);
+      setSpreadsheetJoinRequests(formattedList);
     } catch (e) {
       console.warn("Failed to fetch join requests:", e);
     } finally {
