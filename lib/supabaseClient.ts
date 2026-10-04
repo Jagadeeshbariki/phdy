@@ -629,6 +629,8 @@ export const membershipService = {
   // Approve a join request and promote to official members_directory
   async approveAndCreateMember(req: {
     requestId?: string;
+    email?: string;
+    phone?: string;
     name: string;
     role?: string;
     qualification?: string;
@@ -640,9 +642,34 @@ export const membershipService = {
       if (req.requestId) {
         await supabase
           .from('membership_requests')
+          .update({ status: 'approved' })
+          .eq('id', req.requestId);
+        await supabase
+          .from('membership_requests')
           .update({ status: 'Approved' })
           .eq('id', req.requestId);
       }
+      if (req.email) {
+        await supabase
+          .from('membership_requests')
+          .update({ status: 'approved' })
+          .eq('email', req.email);
+        await supabase
+          .from('membership_requests')
+          .update({ status: 'Approved' })
+          .eq('email', req.email);
+      }
+      if (req.phone) {
+        await supabase
+          .from('membership_requests')
+          .update({ status: 'approved' })
+          .eq('phone', req.phone);
+        await supabase
+          .from('membership_requests')
+          .update({ status: 'Approved' })
+          .eq('phone', req.phone);
+      }
+
       const { error } = await supabase
         .from('members_directory')
         .insert([{
