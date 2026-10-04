@@ -558,20 +558,9 @@ export const membershipService = {
     return { success: false, reason: 'unconfigured' };
   },
 
-  // Get active approved members from directory or members table
+  // Get active approved members from members table
   async getActiveMembers() {
     if (!isSupabaseConfigured()) return null;
-    try {
-      const { data, error } = await supabase
-        .from('members_directory')
-        .select('*')
-        .eq('is_active', true)
-        .order('display_order', { ascending: true });
-
-      if (!error && data) return data;
-    } catch {}
-
-    // Fallback to `members` table if `members_directory` table does not exist
     try {
       const { data, error } = await supabase
         .from('members')
@@ -645,7 +634,7 @@ export const membershipService = {
     }
   },
 
-  // Approve a join request and promote to official members_directory or members
+  // Approve a join request and promote to official members table
   async approveAndCreateMember(req: {
     requestId?: string;
     email?: string;
@@ -689,31 +678,15 @@ export const membershipService = {
           .eq('phone', req.phone);
       }
 
-      try {
-        const { error } = await supabase
-          .from('members_directory')
-          .insert([{
-            name: req.name,
-            role: req.role || 'Active Member',
-            qualification: req.qualification || null,
-            mobile: req.mobile || null,
-            photo_url: req.photo_url || null,
-            is_active: true
-          }]);
-        if (!error) return true;
-      } catch {}
-
-      try {
-        await supabase
-          .from('members')
-          .insert([{
-            full_name: req.name,
-            qualification: req.qualification || null,
-            phone: req.mobile || null,
-            photo_url: req.photo_url || null,
-            status: 'active'
-          }]);
-      } catch {}
+      await supabase
+        .from('members')
+        .insert([{
+          full_name: req.name,
+          qualification: req.qualification || null,
+          phone: req.mobile || null,
+          photo_url: req.photo_url || null,
+          status: 'active'
+        }]);
 
       return true;
     } catch {
@@ -721,7 +694,7 @@ export const membershipService = {
     }
   },
 
-  // Add a member directly into members_directory or members
+  // Add a member directly into members table
   async addMember(member: {
     name: string;
     role?: string;
@@ -730,22 +703,6 @@ export const membershipService = {
     photo_url?: string;
   }) {
     if (!isSupabaseConfigured()) return null;
-    try {
-      const { data, error } = await supabase
-        .from('members_directory')
-        .insert([{
-          name: member.name,
-          role: member.role || 'Active Member',
-          qualification: member.qualification || null,
-          mobile: member.mobile || null,
-          photo_url: member.photo_url || null,
-          is_active: true
-        }])
-        .select()
-        .single();
-      if (!error && data) return data;
-    } catch {}
-
     try {
       const { data, error } = await supabase
         .from('members')
@@ -764,17 +721,9 @@ export const membershipService = {
     return null;
   },
 
-  // Remove a member from directory or members
+  // Remove a member from members table
   async deleteMember(id: string) {
     if (!isSupabaseConfigured()) return false;
-    try {
-      const { error } = await supabase
-        .from('members_directory')
-        .delete()
-        .eq('id', id);
-      if (!error) return true;
-    } catch {}
-
     try {
       const { error } = await supabase
         .from('members')
