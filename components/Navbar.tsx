@@ -23,28 +23,64 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, loggedInUser, 
   }, []);
 
   const roleLower = String(loggedInUser?.role || '').toLowerCase();
-  const isMemberOrAdmin = Boolean(
-    loggedInUser && (roleLower === 'phdy_member' || roleLower === 'admin' || roleLower === 'treasurer' || roleLower === 'tressurer')
-  );
+  const isAdmin = Boolean(loggedInUser && (roleLower === 'admin' || roleLower === 'super_admin'));
+  const isMember = Boolean(loggedInUser && (roleLower === 'phdy_member' || roleLower === 'member' || roleLower === 'treasurer' || roleLower === 'tressurer' || roleLower === 'moderator'));
+  const isRegisteredUser = Boolean(loggedInUser && !isAdmin && !isMember);
+  const isGuest = !loggedInUser;
 
   const getRoleBadge = (roleStr: string) => {
     const r = String(roleStr || '').toLowerCase();
-    if (r === 'admin') return { label: 'Admin', cls: 'bg-indigo-100 text-indigo-800' };
+    if (r === 'admin' || r === 'super_admin') return { label: 'Admin', cls: 'bg-indigo-100 text-indigo-800' };
     if (r === 'treasurer' || r === 'tressurer') return { label: 'Treasurer', cls: 'bg-emerald-100 text-emerald-800' };
-    if (r === 'phdy_member') return { label: 'Member', cls: 'bg-orange-100 text-orange-800' };
+    if (r === 'phdy_member' || r === 'member' || r === 'moderator') return { label: 'Member', cls: 'bg-orange-100 text-orange-800' };
     return { label: 'User', cls: 'bg-gray-100 text-gray-700' };
   };
 
-  const navItems = [
-    { id: 'home', label: 'Home' },
-    { id: 'dashboard', label: 'Tier Dashboard' },
-    { id: 'villagemap', label: 'Village Map' },
-    { id: 'members', label: 'Members' },
-    { id: 'ourworks', label: 'Our Works' },
-    { id: 'accounting', label: 'Accounting' },
-    ...(isMemberOrAdmin ? [{ id: 'internal', label: 'PHDY Internal' }] : []),
-    { id: 'contact', label: 'Contact Us' }
-  ];
+  // Construct dynamic navigation items based on User Access Tier:
+  // 1. Guest: Home, Village Map, Contact Us
+  // 2. Tier 1 User: Home, Village Map, Accounting, Contact Us (+ Tier Dashboard, Our Works)
+  // 3. Tier 2 Member: Tier 1 + Members, PHDY Internal
+  // 4. Tier 3 Admin: All sections including Admin
+  const navItems: { id: Page; label: string }[] = [];
+
+  // Home (All tiers)
+  navItems.push({ id: 'home', label: 'Home' });
+
+  // Village Map (All tiers)
+  navItems.push({ id: 'villagemap', label: 'Village Map' });
+
+  // Tier Dashboard (Registered User, Member, Admin)
+  if (!isGuest) {
+    navItems.push({ id: 'dashboard', label: 'Tier Dashboard' });
+  }
+
+  // Members (Tier 2 Member & Tier 3 Admin)
+  if (isMember || isAdmin) {
+    navItems.push({ id: 'members', label: 'Members' });
+  }
+
+  // Our Works (Registered User, Member, Admin)
+  if (!isGuest) {
+    navItems.push({ id: 'ourworks', label: 'Our Works' });
+  }
+
+  // Accounting (Tier 1 User, Tier 2 Member, Tier 3 Admin)
+  if (!isGuest) {
+    navItems.push({ id: 'accounting', label: 'Accounting' });
+  }
+
+  // PHDY Internal (Tier 2 Member & Tier 3 Admin)
+  if (isMember || isAdmin) {
+    navItems.push({ id: 'internal', label: 'PHDY Internal' });
+  }
+
+  // Admin Panel (Tier 3 Admin only)
+  if (isAdmin) {
+    navItems.push({ id: 'admin', label: 'Admin' });
+  }
+
+  // Contact Us (All tiers)
+  navItems.push({ id: 'contact', label: 'Contact Us' });
 
   const handleMobileNavClick = (page: Page) => {
     onNavClick(page);
@@ -83,20 +119,6 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, loggedInUser, 
               {item.label}
             </button>
           ))}
-
-          {/* Conditional Admin Access - STRICTLY Admin Role Only */}
-          {loggedInUser?.role === 'admin' && (
-            <button
-              onClick={() => onNavClick('admin' as Page)}
-              className={`px-4 py-2 rounded-lg font-bold transition-all duration-300 ${
-                currentPage === 'admin' 
-                ? 'text-orange-700 bg-orange-50' 
-                : 'text-gray-600 hover:text-orange-600 hover:bg-orange-50'
-              }`}
-            >
-              Admin
-            </button>
-          )}
 
           {/* PWA Install Button */}
           <div className="ml-2">
@@ -171,20 +193,6 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, loggedInUser, 
                 {item.label}
               </button>
             ))}
-            
-            {/* Conditional Admin Access for Mobile */}
-            {loggedInUser?.role === 'admin' && (
-              <button
-                onClick={() => handleMobileNavClick('admin' as Page)}
-                className={`w-full text-left px-6 py-4 rounded-2xl font-bold transition-all ${
-                  currentPage === 'admin' 
-                  ? 'text-orange-700 bg-orange-50 shadow-sm' 
-                  : 'text-gray-600 hover:text-orange-600 hover:bg-orange-50'
-                }`}
-              >
-                Admin Panel
-              </button>
-            )}
 
             <div className="pt-4 border-t border-gray-50 mt-4 space-y-3">
               <PWAInstallButton isMobileNav />

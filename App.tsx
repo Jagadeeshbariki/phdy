@@ -21,16 +21,16 @@ export interface LoggedInUser {
   role: 'admin' | 'treasurer' | 'Phdy_member' | 'user' | string;
 }
 
-const hasInternalAccess = (user: LoggedInUser | null) => {
+const isMemberOrAbove = (user: LoggedInUser | null) => {
   if (!user) return false;
   const r = String(user.role).toLowerCase();
-  return r === 'phdy_member' || r === 'admin' || r === 'treasurer' || r === 'tressurer';
+  return r === 'phdy_member' || r === 'member' || r === 'admin' || r === 'super_admin' || r === 'treasurer' || r === 'tressurer' || r === 'moderator';
 };
 
-const hasAdminPortalAccess = (user: LoggedInUser | null) => {
+const isAdminOnly = (user: LoggedInUser | null) => {
   if (!user) return false;
   const r = String(user.role).toLowerCase();
-  return r === 'admin' || r === 'treasurer' || r === 'tressurer';
+  return r === 'admin' || r === 'super_admin';
 };
 
 const App: React.FC = () => {
@@ -53,24 +53,34 @@ const App: React.FC = () => {
       const session = sessionStorage.getItem('phdy_admin_session');
       const user: LoggedInUser | null = session ? JSON.parse(session) : null;
 
-      // Gate PHDY Internal: phdy_member, treasurer, or admin only
-      if (path === 'internal') {
-        if (!hasInternalAccess(user)) {
-          setCurrentPage('home');
-          window.location.hash = 'home';
-          return;
-        }
-      }
-
-      // Gate Admin: admin only
+      // 1. Tier 3 Protected: Admin only
       if (path === 'admin') {
-        if (!user || user.role !== 'admin') {
+        if (!isAdminOnly(user)) {
           setCurrentPage('login');
           window.location.hash = 'login';
           return;
         }
       }
 
+      // 2. Tier 2 Protected: Member and Admin only (Members, PHDY Internal)
+      if (path === 'internal' || path === 'members') {
+        if (!isMemberOrAbove(user)) {
+          setCurrentPage('login');
+          window.location.hash = 'login';
+          return;
+        }
+      }
+
+      // 3. Tier 1 Protected: Registered User, Member, Admin (Accounting, Our Works, Tier Dashboard)
+      if (path === 'accounting' || path === 'ourworks' || path === 'dashboard') {
+        if (!user) {
+          setCurrentPage('login');
+          window.location.hash = 'login';
+          return;
+        }
+      }
+
+      // 4. Public Tiers: Home, Village Map, Contact Us, Login
       if (['home', 'members', 'ourworks', 'accounting', 'contact', 'login', 'admin', 'internal', 'villagemap', 'dashboard'].includes(path)) {
         setCurrentPage(path as Page);
       } else {
@@ -85,18 +95,24 @@ const App: React.FC = () => {
   }, []);
 
   const navigateTo = (page: Page) => {
-    // Gate PHDY Internal
-    if (page === 'internal') {
-      if (!hasInternalAccess(loggedInUser)) {
-        setCurrentPage('login');
-        window.location.hash = 'login';
-        window.scrollTo(0, 0);
-        return;
-      }
+    // 1. Tier 3 Protected: Admin only
+    if (page === 'admin' && !isAdminOnly(loggedInUser)) {
+      setCurrentPage('login');
+      window.location.hash = 'login';
+      window.scrollTo(0, 0);
+      return;
     }
 
-    // Gate Admin: admin only
-    if (page === 'admin' && (!loggedInUser || loggedInUser.role !== 'admin')) {
+    // 2. Tier 2 Protected: Member & Admin only
+    if ((page === 'internal' || page === 'members') && !isMemberOrAbove(loggedInUser)) {
+      setCurrentPage('login');
+      window.location.hash = 'login';
+      window.scrollTo(0, 0);
+      return;
+    }
+
+    // 3. Tier 1 Protected: Registered User, Member, Admin
+    if ((page === 'accounting' || page === 'ourworks' || page === 'dashboard') && !loggedInUser) {
       setCurrentPage('login');
       window.location.hash = 'login';
       window.scrollTo(0, 0);
@@ -124,18 +140,30 @@ const App: React.FC = () => {
       case 'home':
         return <Home onNavigate={navigateTo} />;
       case 'dashboard':
+        if (!loggedInUser) {
+          return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
+        }
         return <DashboardPage loggedInUser={loggedInUser} onNavigate={navigateTo} />;
       case 'members':
+        if (!isMemberOrAbove(loggedInUser)) {
+          return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
+        }
         return <MembersPage />;
       case 'ourworks':
+        if (!loggedInUser) {
+          return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
+        }
         return <OurWorksPage />;
       case 'accounting':
+        if (!loggedInUser) {
+          return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
+        }
         return <AccountingPage />;
       case 'login':
         return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
       case 'internal':
         // Protected: Only phdy_member, treasurer, or admin
-        if (!hasInternalAccess(loggedInUser)) {
+        if (!isMemberOrAbove(loggedInUser)) {
           return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
         }
         return <PHDYInternalPage onNavigate={navigateTo} loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onLogout={onLogout} />;
@@ -144,7 +172,7 @@ const App: React.FC = () => {
       case 'villagemap':
         return <VillageMapPage />;
       case 'admin':
-        if (!loggedInUser || loggedInUser.role !== 'admin') {
+        if (!isAdminOnly(loggedInUser)) {
           return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
         }
         return <AdminPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onLogout={onLogout} onNavigate={navigateTo} />;
