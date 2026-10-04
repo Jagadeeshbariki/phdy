@@ -231,13 +231,58 @@ export const authService = {
         .eq('user_id', userId)
         .maybeSingle();
 
-      if (error) {
-        console.warn('[Supabase Members] Fetch notice:', error.message);
-        return null;
+      if (data && (data.status === 'active' || data.status === 'approved' || data.status === 'Approved')) {
+        return data as OfficialMember;
       }
-      return data as OfficialMember;
-    } catch {
-      return null;
-    }
+    } catch {}
+
+    // Fallback: Check membership_requests table if approved manually in database
+    try {
+      const { data: reqData } = await supabase
+        .from('membership_requests')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (reqData) {
+        const st = String(reqData.status || '').trim().toLowerCase();
+        if (st === 'approved' || st === 'active' || st === 'accepted') {
+          const officialMember: OfficialMember = {
+            id: reqData.id,
+            user_id: userId,
+            membership_number: `PHDY-${Math.floor(100000 + Math.random() * 900000)}`,
+            full_name: reqData.full_name || 'PHDY Member',
+            photo_url: reqData.photo_url || null,
+            date_of_birth: reqData.date_of_birth || null,
+            phone: reqData.phone || null,
+            qualification: reqData.qualification || null,
+            reason_to_join: reqData.reason_to_join || null,
+            joined_at: reqData.submitted_at || new Date().toISOString(),
+            approved_at: new Date().toISOString(),
+            status: 'active',
+          };
+
+          try {
+            await supabase.from('members').upsert({
+              user_id: userId,
+              membership_number: officialMember.membership_number,
+              full_name: officialMember.full_name,
+              photo_url: officialMember.photo_url,
+              date_of_birth: officialMember.date_of_birth,
+              phone: officialMember.phone,
+              qualification: officialMember.qualification,
+              reason_to_join: officialMember.reason_to_join,
+              joined_at: officialMember.joined_at,
+              approved_at: officialMember.approved_at,
+              status: 'active',
+            }, { onConflict: 'user_id' });
+          } catch (e) {}
+
+          return officialMember;
+        }
+      }
+    } catch {}
+
+    return null;
   },
 };

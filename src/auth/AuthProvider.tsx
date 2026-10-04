@@ -143,7 +143,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isAuthenticated = Boolean(user);
   const emailLower = (user?.email || profile?.email || '').toLowerCase().trim();
   const isAdmin = Boolean(profile?.is_admin === true || (user?.user_metadata?.role || '').toLowerCase() === 'admin' || emailLower === 'vyomanautjagadeesh@gmail.com' || emailLower === 'admin@phdy.org');
-  const isMember = Boolean(membership?.status === 'active' || isAdmin);
+  const reqStatus = (membershipRequest?.status || '').trim().toLowerCase();
+  const isMember = Boolean(
+    membership?.status === 'active' || 
+    reqStatus === 'approved' || 
+    reqStatus === 'active' || 
+    reqStatus === 'accepted' || 
+    isAdmin
+  );
 
   return (
     <AuthContext.Provider
