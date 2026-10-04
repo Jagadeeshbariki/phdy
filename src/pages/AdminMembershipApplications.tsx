@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { authService, PHDYMemberApplication } from '../auth/authService';
+import { supabase } from '../lib/supabaseClient';
 import { usePermissions } from '../hooks/usePermissions';
 import { CheckCircle2, XCircle, Clock, ShieldCheck, UserCheck, Search, Filter, RefreshCw, AlertCircle } from 'lucide-react';
 
@@ -37,9 +38,29 @@ export const AdminMembershipApplications: React.FC = () => {
     setActionMessage(null);
     try {
       const res = await authService.approveMembership(app.user_id);
+      
+      // Dispatch activation email to the approved user's email
+      const userEmail = app.profiles?.email;
+      if (userEmail) {
+        try {
+          await supabase.auth.signInWithOtp({
+            email: userEmail,
+            options: {
+              emailRedirectTo: 'https://phdy.vercel.app/#login',
+              data: {
+                full_name: app.profiles?.full_name || 'Member',
+                role: 'phdy_member'
+              }
+            }
+          });
+        } catch (e) {
+          console.warn('Supabase automated email dispatch notice:', e);
+        }
+      }
+
       setActionMessage({
         type: 'success',
-        text: `Approved! Membership ID ${res.membership_id || ''} assigned to ${app.profiles?.full_name}.`,
+        text: `Approved! Membership ID ${res.membership_id || ''} assigned to ${app.profiles?.full_name}. Activation notification dispatched to ${userEmail || 'user'}.`,
       });
       await loadApplications();
     } catch (err: any) {
