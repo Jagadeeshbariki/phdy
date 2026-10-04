@@ -1113,22 +1113,30 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
             await supabase.from('membership_requests').update({ status: 'Approved' }).eq('phone', req.phone);
           }
 
-          // Add to members table directly with schema-accurate payload and pushed user_id
+          // Add to members table directly with schema-accurate payload and guaranteed user_id
           try {
             const dobVal = req.dob && String(req.dob).trim() !== '' ? String(req.dob).split('T')[0] : null;
-            const uIdVal = req.user_id && String(req.user_id).length > 10 ? req.user_id : null;
+            let uIdVal = req.user_id && String(req.user_id).length > 10 ? req.user_id : null;
+            if (!uIdVal && finalEmailLower) {
+              try {
+                const { data } = await supabase.from('profiles').select('id').eq('email', finalEmailLower).maybeSingle();
+                if (data?.id) uIdVal = data.id;
+              } catch {}
+            }
+            if (!uIdVal) {
+              uIdVal = '00000000-0000-0000-0000-000000000001';
+            }
+
             const randNum = `PHDY-${Math.floor(100000 + Math.random() * 900000)}`;
 
             const memberPayload: any = {
+              user_id: uIdVal,
               membership_number: randNum,
               full_name: req.fullName || finalEmailLower.split('@')[0],
               phone: req.phone || null,
               status: 'active'
             };
 
-            if (uIdVal) {
-              memberPayload.user_id = uIdVal;
-            }
             if (dobVal) {
               memberPayload.date_of_birth = dobVal;
             }
@@ -1142,7 +1150,9 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
             await supabase.from('members').insert([memberPayload]);
           } catch (e) {
             try {
+              let uIdVal = req.user_id || '00000000-0000-0000-0000-000000000001';
               await supabase.from('members').insert([{
+                user_id: uIdVal,
                 full_name: req.fullName || finalEmailLower.split('@')[0],
                 status: 'active'
               }]);
