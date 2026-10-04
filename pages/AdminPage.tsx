@@ -608,6 +608,62 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         localStorage.setItem('phdy_registered_users_list', JSON.stringify(updatedList));
       } catch (e) {}
 
+      // Persist directly to Supabase database tables
+      if (isSupabaseConfigured()) {
+        try {
+          // 1. Update public.profiles
+          const { data: existingProf } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('email', targetEmail)
+            .maybeSingle();
+
+          if (existingProf?.id) {
+            await supabase.from('profiles').update({
+              full_name: targetUser?.name || targetEmail.split('@')[0],
+              status: 'active'
+            }).eq('id', existingProf.id);
+          } else {
+            await supabase.from('profiles').insert([{
+              full_name: targetUser?.name || targetEmail.split('@')[0],
+              email: targetEmail,
+              status: 'active'
+            }]);
+          }
+
+          // 2. Update public.members_directory designation
+          const newDesignation = 
+            targetRole === 'admin' ? 'Administrator' :
+            targetRole === 'treasurer' ? 'Treasurer' :
+            targetRole === 'phdy_member' ? 'Active Member' : 'Member';
+
+          const targetName = targetUser?.name || targetEmail.split('@')[0];
+          await supabase
+            .from('members_directory')
+            .update({ designation: newDesignation })
+            .ilike('name', `%${targetName}%`);
+
+          // 3. Update public.membership_requests
+          await supabase.from('membership_requests').update({
+            status: 'Approved'
+          }).eq('email', targetEmail);
+
+          // 4. Update role in RBAC user_roles if roles table exists
+          try {
+            const { data: roleData } = await supabase.from('roles').select('id').eq('name', targetRole).single();
+            const { data: profData } = await supabase.from('profiles').select('id').eq('email', targetEmail).single();
+            if (roleData?.id && profData?.id) {
+              await supabase.from('user_roles').insert([{
+                user_id: profData.id,
+                role_id: roleData.id
+              }]);
+            }
+          } catch (rErr) {}
+        } catch (supaErr) {
+          console.warn('[Supabase Role Update Notice]:', supaErr);
+        }
+      }
+
       // Update current session if the admin edited their own account
       if (loggedInUser && targetEmail && userEmail && targetEmail === userEmail) {
         const updatedSelf = { ...loggedInUser, role: targetRole };
@@ -1071,26 +1127,43 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
             await supabase.from('membership_requests').update({ status: 'Approved' }).eq('phone', req.phone);
           }
 
-          // Add to members_directory
-          await supabase.from('members_directory').insert([{
-            name: req.fullName || finalEmailLower.split('@')[0],
-            role: 'Active Member',
-            qualification: req.education || req.dob || 'Member',
-            mobile: req.phone || null,
-            photo_url: req.photoUrl || req.photo_url || null,
-            is_active: true
-          }]);
+          // Add to members_directory with exact matching schema columns
+          try {
+            await supabase.from('members_directory').insert([{
+              name: req.fullName || finalEmailLower.split('@')[0],
+              designation: 'Active Member',
+              education: req.education || req.dob || 'Graduate',
+              category: 'Youth Wing',
+              image_url: req.photoUrl || req.photo_url || null,
+              is_active: true
+            }]);
+          } catch (memErr) {
+            console.warn('[members_directory insert]:', memErr);
+          }
 
-          // Also ensure profile in public.profiles is Active with PHDY Member role
+          // Also ensure profile in public.profiles is Active
           if (finalEmailLower) {
             try {
-              await supabase.from('profiles').upsert({
-                email: finalEmailLower,
-                full_name: req.fullName || finalEmailLower.split('@')[0],
-                phone: req.phone || null,
-                status: 'Active',
-                role: 'phdy_member'
-              }, { onConflict: 'email' });
+              const { data: existingProf } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('email', finalEmailLower)
+                .maybeSingle();
+
+              if (existingProf?.id) {
+                await supabase.from('profiles').update({
+                  full_name: req.fullName || finalEmailLower.split('@')[0],
+                  phone: req.phone || null,
+                  status: 'active'
+                }).eq('id', existingProf.id);
+              } else {
+                await supabase.from('profiles').insert([{
+                  full_name: req.fullName || finalEmailLower.split('@')[0],
+                  email: finalEmailLower,
+                  phone: req.phone || null,
+                  status: 'active'
+                }]);
+              }
             } catch (pErr) {
               console.warn('[Supabase Profiles Update Notice]:', pErr);
             }
