@@ -35,11 +35,14 @@ export const getAuthRedirectUrl = (route: string = '#login'): string => {
   return `https://phdy.vercel.app/${cleanRoute}`;
 };
 
-// Retrieve environment variables with fallback
+// Retrieve environment variables with fallback to project config
+const DEFAULT_SUPABASE_URL = 'https://icjbagncemlpibulbmkw.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImljamJhZ25jZW1scGlidWxibWt3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTExMDQ4NzgsImV4cCI6MjEwNjY4MDg3OH0.dPQAs46Myjl6V6r1CfabsgUXS4wTxMFYSdv6N-n_Kl4';
+
 const getRawEnvConfig = () => {
   const metaEnv = (import.meta as any).env || {};
-  const envUrl = cleanSupabaseUrl(metaEnv.VITE_SUPABASE_URL || metaEnv.SUPABASE_URL || '');
-  const envKey = (metaEnv.VITE_SUPABASE_ANON_KEY || metaEnv.SUPABASE_ANON_KEY || metaEnv.SUPABASE_KEY || '').trim();
+  const envUrl = cleanSupabaseUrl(metaEnv.VITE_SUPABASE_URL || metaEnv.SUPABASE_URL || DEFAULT_SUPABASE_URL);
+  const envKey = (metaEnv.VITE_SUPABASE_ANON_KEY || metaEnv.SUPABASE_ANON_KEY || metaEnv.SUPABASE_KEY || DEFAULT_SUPABASE_ANON_KEY).trim();
   return { envUrl, envKey };
 };
 

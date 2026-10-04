@@ -157,52 +157,52 @@ export const LoginPage: React.FC<LoginPageProps> = ({ loggedInUser, onLoginSucce
         const regEmail = inputEmail;
         const redirectUrl = getAuthRedirectUrl('#login');
 
-        let supaRegistered = false;
-        if (isSupabaseConfigured()) {
-          try {
-            const { data, error } = await supabase.auth.signUp({
-              email: regEmail,
-              password: inputPass,
-              options: {
-                emailRedirectTo: redirectUrl,
-                data: {
-                  name: loginData.name.trim(),
-                  role: 'user' // Default new registration role
-                }
-              }
-            });
+        // Always register with Supabase Auth
+        const { data, error } = await supabase.auth.signUp({
+          email: regEmail,
+          password: inputPass,
+          options: {
+            emailRedirectTo: redirectUrl,
+            data: {
+              full_name: loginData.name.trim(),
+              name: loginData.name.trim(),
+              role: 'user' // Default new registration role
+            }
+          }
+        });
 
-            if (error) {
-              if (error.message.includes("already registered")) {
-                throw new Error("An account with this email is already registered. Please sign in instead.");
-              }
-              throw error;
-            }
-            supaRegistered = true;
-          } catch (supaErr: any) {
-            if (supaErr.message?.includes("already registered")) {
-              throw supaErr;
-            }
-            console.warn("[Supabase Auth] SignUp Notice:", supaErr.message);
+        if (error) {
+          const errLower = error.message?.toLowerCase() || '';
+          if (errLower.includes("already registered") || errLower.includes("already exists") || errLower.includes("user already registered")) {
+            throw new Error("An account with this email is already registered. Please sign in instead.");
+          }
+          if (errLower.includes("password should be at least")) {
+            throw new Error("Password should be at least 6 characters long.");
+          }
+          if (errLower.includes("rate limit") || errLower.includes("too many requests")) {
+            throw new Error("Too many attempts. Please wait a minute and try again.");
+          }
+          throw error;
+        }
+
+        // If user is created, create/upsert the profile record in profiles table
+        if (data?.user?.id) {
+          try {
+            await supabase.from('profiles').upsert({
+              id: data.user.id,
+              full_name: loginData.name.trim(),
+              email: regEmail,
+              status: 'active',
+              is_admin: false,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'id' });
+          } catch (profileErr) {
+            console.warn("[Profiles table auto-upsert]:", profileErr);
           }
         }
 
-        // Store registration in local directory as active standard user
-        const newRegUser = {
-          name: loginData.name.trim(),
-          email: regEmail,
-          role: 'user',
-          joinedDate: new Date().toISOString().split('T')[0],
-          status: 'Active',
-          password: inputPass
-        };
-
-        const existingList: any[] = JSON.parse(localStorage.getItem('phdy_registered_users_list') || '[]');
-        const filtered = existingList.filter(u => String(u.email || '').toLowerCase().trim() !== regEmail);
-        filtered.unshift(newRegUser);
-        localStorage.setItem('phdy_registered_users_list', JSON.stringify(filtered));
-
-        setAuthSuccess("Registration successful! Please check your email inbox and click the confirmation link to activate your account. Once verified, you can sign in directly.");
+        setAuthSuccess(`Registration successful! Supabase has sent a verification email to ${regEmail}. Please open your inbox and click the confirmation link to activate your account.`);
         setAuthMode('login');
         setLoginData(prev => ({ ...prev, password: '', confirmPassword: '' }));
       }

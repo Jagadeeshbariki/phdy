@@ -778,21 +778,39 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
         const assignedRole = isAdminEmail ? 'admin' : ((loginData as any).role || 'user');
         const assignedStatus = isAdminEmail ? 'Active' : 'Pending Approval';
 
-        if (isSupabaseConfigured()) {
+        const { data: supaData, error: supaErr } = await supabase.auth.signUp({
+          email: regEmail,
+          password: inputPass,
+          options: {
+            emailRedirectTo: getAuthRedirectUrl('#login'),
+            data: {
+              full_name: (loginData.name || '').trim(),
+              name: (loginData.name || '').trim(),
+              role: assignedRole
+            }
+          }
+        });
+
+        if (supaErr) {
+          const msg = supaErr.message?.toLowerCase() || '';
+          if (!msg.includes("already registered") && !msg.includes("already exists")) {
+            console.warn("[Supabase Auth] SignUp notice:", supaErr.message);
+          }
+        }
+
+        if (supaData?.user?.id) {
           try {
-            await supabase.auth.signUp({
+            await supabase.from('profiles').upsert({
+              id: supaData.user.id,
+              full_name: (loginData.name || '').trim() || regEmail.split('@')[0],
               email: regEmail,
-              password: inputPass,
-              options: {
-                emailRedirectTo: getAuthRedirectUrl('#login'),
-                data: {
-                  name: (loginData.name || '').trim(),
-                  role: assignedRole
-                }
-              }
-            });
-          } catch (e) {
-            console.warn("[Supabase Auth] SignUp notice:", e);
+              status: assignedStatus === 'Active' ? 'active' : 'active',
+              is_admin: assignedRole === 'admin',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'id' });
+          } catch (pe) {
+            console.warn("[Profiles upsert]:", pe);
           }
         }
 
