@@ -54,13 +54,19 @@ const Home: React.FC<HomeProps> = ({ onNavigate }) => {
 
               <div className="flex flex-col sm:flex-row gap-4 justify-center md:justify-start">
                 <button 
-                  onClick={() => onNavigate('villagemap')}
+                  onClick={() => onNavigate('dashboard')}
                   className="px-8 py-4 bg-orange-600 hover:bg-orange-700 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-orange-600/20 transition-all hover:scale-105 active:scale-95 flex items-center justify-center group text-xs md:text-sm"
                 >
-                  <span>Village Map</span>
+                  <span>Tier Dashboard</span>
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                   </svg>
+                </button>
+                <button 
+                  onClick={() => onNavigate('villagemap')}
+                  className="px-8 py-4 bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105 text-xs md:text-sm flex items-center justify-center"
+                >
+                  <span>Village Map</span>
                 </button>
                 <button 
                   onClick={() => document.getElementById('our-story')?.scrollIntoView({ behavior: 'smooth' })}
