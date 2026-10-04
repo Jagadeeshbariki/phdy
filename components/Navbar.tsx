@@ -25,7 +25,7 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, loggedInUser, 
   const roleLower = String(loggedInUser?.role || '').toLowerCase();
   const isAdmin = Boolean(loggedInUser && (roleLower === 'admin' || roleLower === 'super_admin'));
   const isMember = Boolean(loggedInUser && (roleLower === 'phdy_member' || roleLower === 'member' || roleLower === 'treasurer' || roleLower === 'tressurer' || roleLower === 'moderator'));
-  const isRegisteredUser = Boolean(loggedInUser && !isAdmin && !isMember);
+  const isTier1User = Boolean(loggedInUser && !isAdmin && !isMember);
   const isGuest = !loggedInUser;
 
   const getRoleBadge = (roleStr: string) => {
@@ -37,10 +37,10 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, loggedInUser, 
   };
 
   // Construct dynamic navigation items based on User Access Tier:
-  // 1. Guest: Home, Village Map, Contact Us
-  // 2. Tier 1 User: Home, Village Map, Accounting, Contact Us (+ Tier Dashboard, Our Works)
-  // 3. Tier 2 Member: Tier 1 + Members, PHDY Internal
-  // 4. Tier 3 Admin: All sections including Admin
+  // 1. Unregistered (Guest): Home, Village Map, Contact Us
+  // 2. Tier 1 User: Home, Village Map, Accounting, Contact Us (+ Tier Dashboard)
+  // 3. Tier 2 Member: Home, Village Map, Members, Accounting, PHDY Internal, Contact Us (+ Tier Dashboard)
+  // 4. Tier 3 Admin: All sections (Home, Village Map, Members, Our Works, Accounting, PHDY Internal, Tier Dashboard, Admin, Contact Us)
   const navItems: { id: Page; label: string }[] = [];
 
   // Home (All tiers)
@@ -49,29 +49,29 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, loggedInUser, 
   // Village Map (All tiers)
   navItems.push({ id: 'villagemap', label: 'Village Map' });
 
-  // Tier Dashboard (Registered User, Member, Admin)
-  if (!isGuest) {
-    navItems.push({ id: 'dashboard', label: 'Tier Dashboard' });
-  }
-
-  // Members (Tier 2 Member & Tier 3 Admin)
+  // Members (Tier 2 Member & Tier 3 Admin ONLY)
   if (isMember || isAdmin) {
     navItems.push({ id: 'members', label: 'Members' });
   }
 
-  // Our Works (Registered User, Member, Admin)
-  if (!isGuest) {
+  // Our Works (Tier 3 Admin only)
+  if (isAdmin) {
     navItems.push({ id: 'ourworks', label: 'Our Works' });
   }
 
   // Accounting (Tier 1 User, Tier 2 Member, Tier 3 Admin)
-  if (!isGuest) {
+  if (isTier1User || isMember || isAdmin) {
     navItems.push({ id: 'accounting', label: 'Accounting' });
   }
 
   // PHDY Internal (Tier 2 Member & Tier 3 Admin)
   if (isMember || isAdmin) {
     navItems.push({ id: 'internal', label: 'PHDY Internal' });
+  }
+
+  // Tier Dashboard (Tier 1 User, Tier 2 Member, Tier 3 Admin)
+  if (!isGuest) {
+    navItems.push({ id: 'dashboard', label: 'Tier Dashboard' });
   }
 
   // Admin Panel (Tier 3 Admin only)

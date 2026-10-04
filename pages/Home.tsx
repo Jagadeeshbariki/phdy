@@ -2,18 +2,25 @@
 import React, { useState } from 'react';
 import MembersList from '../components/MembersList';
 import { MultiTierDashboard } from '../components/MultiTierDashboard';
-import { Page } from '../App';
+import { LoggedInUser, Page } from '../App';
 import aboutConfigData from '../public/AboutConfig.json';
 
 interface HomeProps {
   onNavigate: (page: Page) => void;
+  loggedInUser?: LoggedInUser | null;
 }
 
-const Home: React.FC<HomeProps> = ({ onNavigate }) => {
+const Home: React.FC<HomeProps> = ({ onNavigate, loggedInUser }) => {
   const [history] = useState<any[]>(() => {
     const config = Array.isArray(aboutConfigData) ? aboutConfigData[0] : aboutConfigData;
     return config?.history || [];
   });
+
+  const roleLower = String(loggedInUser?.role || '').toLowerCase();
+  const isAdmin = Boolean(loggedInUser && (roleLower === 'admin' || roleLower === 'super_admin'));
+  const isMember = Boolean(loggedInUser && (roleLower === 'phdy_member' || roleLower === 'member' || roleLower === 'treasurer' || roleLower === 'tressurer' || roleLower === 'moderator'));
+  const isTier1User = Boolean(loggedInUser && !isAdmin && !isMember);
+  const isGuest = !loggedInUser;
 
   return (
     <div className="animate-fadeIn">
@@ -52,42 +59,60 @@ const Home: React.FC<HomeProps> = ({ onNavigate }) => {
                 A dedicated group of youth committed to the sustainable development and infrastructure of <span className="text-white">Pedda Harivanam</span>. Join us in making a difference.
               </p>
 
-              <div className="flex flex-col sm:flex-row gap-4 justify-center md:justify-start">
-                <button 
-                  onClick={() => onNavigate('dashboard')}
-                  className="px-8 py-4 bg-orange-600 hover:bg-orange-700 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-orange-600/20 transition-all hover:scale-105 active:scale-95 flex items-center justify-center group text-xs md:text-sm"
-                >
-                  <span>Tier Dashboard</span>
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                  </svg>
-                </button>
+              <div className="flex flex-wrap gap-4 justify-center md:justify-start">
                 <button 
                   onClick={() => onNavigate('villagemap')}
-                  className="px-8 py-4 bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105 text-xs md:text-sm flex items-center justify-center"
-                >
-                  <span>Village Map</span>
-                </button>
-                <button 
-                  onClick={() => document.getElementById('our-story')?.scrollIntoView({ behavior: 'smooth' })}
                   className="px-8 py-4 bg-orange-600 hover:bg-orange-700 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-orange-600/20 transition-all hover:scale-105 active:scale-95 flex items-center justify-center group text-xs md:text-sm"
                 >
-                  <span>Our Story</span>
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 ml-2 group-hover:translate-y-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+                  <span>Village Map</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 ml-2 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                   </svg>
                 </button>
+
                 <button 
-                  onClick={() => document.getElementById('members')?.scrollIntoView({ behavior: 'smooth' })}
-                  className="px-8 py-4 bg-white/5 hover:bg-white/10 text-white border border-white/20 rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105 text-xs md:text-sm"
+                  onClick={() => document.getElementById('our-story')?.scrollIntoView({ behavior: 'smooth' })}
+                  className="px-8 py-4 bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105 text-xs md:text-sm flex items-center justify-center"
                 >
-                  Meet the Team
+                  <span>Our Story</span>
                 </button>
+
+                {/* Accounting Button for Tier 1 User, Member, Admin */}
+                {!isGuest && (
+                  <button 
+                    onClick={() => onNavigate('accounting')}
+                    className="px-8 py-4 bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105 text-xs md:text-sm"
+                  >
+                    Accounting
+                  </button>
+                )}
+
+                {/* Members Button for Tier 2 Member & Admin */}
+                {(isMember || isAdmin) && (
+                  <button 
+                    onClick={() => document.getElementById('members')?.scrollIntoView({ behavior: 'smooth' })}
+                    className="px-8 py-4 bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105 text-xs md:text-sm"
+                  >
+                    Meet the Team
+                  </button>
+                )}
+
+                {/* Tier Dashboard Button for Logged in Users */}
+                {!isGuest && (
+                  <button 
+                    onClick={() => onNavigate('dashboard')}
+                    className="px-8 py-4 bg-orange-600/30 hover:bg-orange-600/50 text-orange-400 border border-orange-500/30 rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105 text-xs md:text-sm flex items-center gap-1.5"
+                  >
+                    <span>Tier Dashboard</span>
+                  </button>
+                )}
+
+                {/* Contact Us / Join Us */}
                 <button 
                   onClick={() => onNavigate('contact')}
                   className="px-8 py-4 bg-white/5 hover:bg-white/10 text-white border border-white/20 rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105 text-xs md:text-sm"
                 >
-                  Join Us
+                  {isGuest ? 'Join Us' : 'Contact Us'}
                 </button>
               </div>
             </div>
@@ -192,36 +217,33 @@ const Home: React.FC<HomeProps> = ({ onNavigate }) => {
         </div>
       </section>
 
-      {/* Multi-Tier Access Control Interactive Section */}
-      <section id="tier-dashboard" className="border-t border-gray-200">
-        <MultiTierDashboard 
-          loggedInUser={(() => {
-            try {
-              const saved = sessionStorage.getItem('phdy_admin_session');
-              return saved ? JSON.parse(saved) : null;
-            } catch {
-              return null;
-            }
-          })()} 
-          onNavigate={onNavigate} 
-          isStandalonePage={false} 
-        />
-      </section>
+      {/* Multi-Tier Access Control Section (Available for logged in users) */}
+      {!isGuest && (
+        <section id="tier-dashboard" className="border-t border-gray-200">
+          <MultiTierDashboard 
+            loggedInUser={loggedInUser || null} 
+            onNavigate={onNavigate} 
+            isStandalonePage={false} 
+          />
+        </section>
+      )}
 
-      {/* Members Section - Fetched from Spreadsheet */}
-      <section id="members" className="py-24 px-6 bg-gray-50 border-t border-gray-100">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-20">
-            <span className="text-orange-600 font-black uppercase tracking-[0.4em] text-xs mb-4 block">Our Team</span>
-            <h2 className="text-4xl md:text-5xl font-black text-gray-900 mb-4 uppercase tracking-wider font-poppins">Group Members</h2>
-            <div className="w-24 h-2 bg-orange-600 mx-auto rounded-full mb-8"></div>
-            <p className="text-xl text-gray-400 max-w-2xl mx-auto font-bold uppercase tracking-tight">
-              United for the progress of Pedda Harivanam.
-            </p>
+      {/* Members Section - STRICTLY Tier 2 Member & Tier 3 Admin ONLY */}
+      {(isMember || isAdmin) && (
+        <section id="members" className="py-24 px-6 bg-gray-50 border-t border-gray-100">
+          <div className="max-w-7xl mx-auto">
+            <div className="text-center mb-20">
+              <span className="text-orange-600 font-black uppercase tracking-[0.4em] text-xs mb-4 block">Our Team</span>
+              <h2 className="text-4xl md:text-5xl font-black text-gray-900 mb-4 uppercase tracking-wider font-poppins">Group Members</h2>
+              <div className="w-24 h-2 bg-orange-600 mx-auto rounded-full mb-8"></div>
+              <p className="text-xl text-gray-400 max-w-2xl mx-auto font-bold uppercase tracking-tight">
+                United for the progress of Pedda Harivanam.
+              </p>
+            </div>
+            <MembersList />
           </div>
-          <MembersList />
-        </div>
-      </section>
+        </section>
+      )}
     </div>
   );
 };

@@ -49,21 +49,44 @@ const Footer: React.FC<FooterProps> = ({ onNavClick, loggedInUser, onOpenSupabas
     };
   }, []);
   const roleLower = String(loggedInUser?.role || '').toLowerCase();
-  const isMemberOrAdmin = Boolean(
-    loggedInUser && (roleLower === 'phdy_member' || roleLower === 'admin' || roleLower === 'treasurer' || roleLower === 'tressurer')
-  );
-  const isAdmin = Boolean(loggedInUser && loggedInUser.role === 'admin');
+  const isAdmin = Boolean(loggedInUser && (roleLower === 'admin' || roleLower === 'super_admin'));
+  const isMember = Boolean(loggedInUser && (roleLower === 'phdy_member' || roleLower === 'member' || roleLower === 'treasurer' || roleLower === 'tressurer' || roleLower === 'moderator'));
+  const isTier1User = Boolean(loggedInUser && !isAdmin && !isMember);
+  const isGuest = !loggedInUser;
 
-  const siteMap = [
-    { id: 'home', label: 'Home' },
-    { id: 'villagemap', label: 'Village Map' },
-    { id: 'members', label: 'Members' },
-    { id: 'ourworks', label: 'Our Works' },
-    { id: 'accounting', label: 'Accounting' },
-    ...(isMemberOrAdmin ? [{ id: 'internal', label: 'PHDY Internal' }] : []),
-    { id: 'contact', label: 'Contact Us' },
-    ...(isAdmin ? [{ id: 'admin', label: 'Admin Portal' }] : (!loggedInUser ? [{ id: 'login', label: 'Sign In' }] : []))
-  ];
+  const siteMap: { id: string; label: string }[] = [];
+  siteMap.push({ id: 'home', label: 'Home' });
+  siteMap.push({ id: 'villagemap', label: 'Village Map' });
+
+  if (isMember || isAdmin) {
+    siteMap.push({ id: 'members', label: 'Members' });
+  }
+
+  if (isAdmin) {
+    siteMap.push({ id: 'ourworks', label: 'Our Works' });
+  }
+
+  if (isTier1User || isMember || isAdmin) {
+    siteMap.push({ id: 'accounting', label: 'Accounting' });
+  }
+
+  if (isMember || isAdmin) {
+    siteMap.push({ id: 'internal', label: 'PHDY Internal' });
+  }
+
+  if (!isGuest) {
+    siteMap.push({ id: 'dashboard', label: 'Tier Dashboard' });
+  }
+
+  if (isAdmin) {
+    siteMap.push({ id: 'admin', label: 'Admin Portal' });
+  }
+
+  siteMap.push({ id: 'contact', label: 'Contact Us' });
+
+  if (isGuest) {
+    siteMap.push({ id: 'login', label: 'Sign In' });
+  }
 
   return (
     <footer className="bg-[#ffa600d2] text-gray-900 py-12 px-4 border-t border-orange-400">

@@ -138,23 +138,26 @@ const App: React.FC = () => {
   const renderPage = () => {
     switch (currentPage) {
       case 'home':
-        return <Home onNavigate={navigateTo} />;
+        return <Home onNavigate={navigateTo} loggedInUser={loggedInUser} />;
       case 'dashboard':
         if (!loggedInUser) {
           return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
         }
         return <DashboardPage loggedInUser={loggedInUser} onNavigate={navigateTo} />;
       case 'members':
+        // Tier 2 & Tier 3 only
         if (!isMemberOrAbove(loggedInUser)) {
           return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
         }
         return <MembersPage />;
       case 'ourworks':
-        if (!loggedInUser) {
+        // Tier 3 Admin only
+        if (!isAdminOnly(loggedInUser)) {
           return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
         }
         return <OurWorksPage />;
       case 'accounting':
+        // Tier 1, Tier 2, Tier 3 (Registered users & above)
         if (!loggedInUser) {
           return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
         }
@@ -162,7 +165,7 @@ const App: React.FC = () => {
       case 'login':
         return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
       case 'internal':
-        // Protected: Only phdy_member, treasurer, or admin
+        // Tier 2 & Tier 3 only (Protected: Only phdy_member, treasurer, or admin)
         if (!isMemberOrAbove(loggedInUser)) {
           return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
         }
@@ -172,12 +175,13 @@ const App: React.FC = () => {
       case 'villagemap':
         return <VillageMapPage />;
       case 'admin':
+        // Tier 3 Admin only
         if (!isAdminOnly(loggedInUser)) {
           return <LoginPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onNavigate={navigateTo} />;
         }
         return <AdminPage loggedInUser={loggedInUser} onLoginSuccess={onLoginSuccess} onLogout={onLogout} onNavigate={navigateTo} />;
       default:
-        return <Home onNavigate={navigateTo} />;
+        return <Home onNavigate={navigateTo} loggedInUser={loggedInUser} />;
     }
   };
 
