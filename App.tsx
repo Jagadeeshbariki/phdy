@@ -10,10 +10,11 @@ import AdminPage from './pages/AdminPage';
 import { LoginPage } from './pages/LoginPage';
 import PHDYInternalPage from './pages/PHDYInternalPage';
 import VillageMapPage from './pages/VillageMapPage';
+import { DashboardPage } from './pages/DashboardPage';
 import Footer from './components/Footer';
 import { SupabaseConnectionTester } from './components/SupabaseConnectionTester';
 
-export type Page = 'home' | 'members' | 'ourworks' | 'accounting' | 'contact' | 'login' | 'admin' | 'internal' | 'villagemap';
+export type Page = 'home' | 'members' | 'ourworks' | 'accounting' | 'contact' | 'login' | 'admin' | 'internal' | 'villagemap' | 'dashboard';
 
 export interface LoggedInUser {
   email: string;
@@ -70,7 +71,7 @@ const App: React.FC = () => {
         }
       }
 
-      if (['home', 'members', 'ourworks', 'accounting', 'contact', 'login', 'admin', 'internal', 'villagemap'].includes(path)) {
+      if (['home', 'members', 'ourworks', 'accounting', 'contact', 'login', 'admin', 'internal', 'villagemap', 'dashboard'].includes(path)) {
         setCurrentPage(path as Page);
       } else {
         setCurrentPage('home');
@@ -122,6 +123,8 @@ const App: React.FC = () => {
     switch (currentPage) {
       case 'home':
         return <Home onNavigate={navigateTo} />;
+      case 'dashboard':
+        return <DashboardPage loggedInUser={loggedInUser} onNavigate={navigateTo} />;
       case 'members':
         return <MembersPage />;
       case 'ourworks':

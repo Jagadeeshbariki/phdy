@@ -37,6 +37,7 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, loggedInUser, 
 
   const navItems = [
     { id: 'home', label: 'Home' },
+    { id: 'dashboard', label: 'Tier Dashboard' },
     { id: 'villagemap', label: 'Village Map' },
     { id: 'members', label: 'Members' },
     { id: 'ourworks', label: 'Our Works' },

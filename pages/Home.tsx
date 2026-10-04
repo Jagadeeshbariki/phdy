@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import MembersList from '../components/MembersList';
+import { MultiTierDashboard } from '../components/MultiTierDashboard';
 import { Page } from '../App';
 import aboutConfigData from '../public/AboutConfig.json';
 
@@ -183,6 +184,22 @@ const Home: React.FC<HomeProps> = ({ onNavigate }) => {
             </div>
           </div>
         </div>
+      </section>
+
+      {/* Multi-Tier Access Control Interactive Section */}
+      <section id="tier-dashboard" className="border-t border-gray-200">
+        <MultiTierDashboard 
+          loggedInUser={(() => {
+            try {
+              const saved = sessionStorage.getItem('phdy_admin_session');
+              return saved ? JSON.parse(saved) : null;
+            } catch {
+              return null;
+            }
+          })()} 
+          onNavigate={onNavigate} 
+          isStandalonePage={false} 
+        />
       </section>
 
       {/* Members Section - Fetched from Spreadsheet */}
