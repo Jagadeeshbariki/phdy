@@ -1113,16 +1113,31 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
             await supabase.from('membership_requests').update({ status: 'Approved' }).eq('phone', req.phone);
           }
 
-          // Add to members table directly
+          // Add to members table directly with resilient fallbacks
           try {
-            await supabase.from('members').insert([{
-              user_id: req.user_id || null,
-              full_name: req.fullName || finalEmailLower.split('@')[0],
-              qualification: req.education || req.dob || 'Graduate',
-              phone: req.phone || null,
-              photo_url: req.photoUrl || req.photo_url || null,
-              status: 'active'
-            }]);
+            const memberPayloads = [
+              {
+                user_id: req.user_id || null,
+                full_name: req.fullName || finalEmailLower.split('@')[0],
+                qualification: req.education || req.dob || 'Graduate',
+                phone: req.phone || null,
+                photo_url: req.photoUrl || req.photo_url || null,
+                status: 'active'
+              },
+              {
+                full_name: req.fullName || finalEmailLower.split('@')[0],
+                phone: req.phone || null,
+                status: 'active'
+              },
+              {
+                full_name: req.fullName || finalEmailLower.split('@')[0]
+              }
+            ];
+
+            for (const p of memberPayloads) {
+              const { error } = await supabase.from('members').insert([p]);
+              if (!error) break;
+            }
           } catch (e) {}
 
           // Also ensure profile in public.profiles exists safely (avoiding non-existent columns)
