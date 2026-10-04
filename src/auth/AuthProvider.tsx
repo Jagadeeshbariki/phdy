@@ -42,12 +42,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         authService.getMembershipRequest(currentUser.id),
       ]);
 
+      const currentEmail = (currentUser.email || userProfile?.email || '').toLowerCase().trim();
+      const isDesignatedAdmin = currentEmail === 'vyomanautjagadeesh@gmail.com' || currentEmail === 'admin@phdy.org';
+
+      // Auto-elevate admin in profiles table if designated
+      if (isDesignatedAdmin) {
+        if (userProfile && !userProfile.is_admin) {
+          try {
+            await supabase.from('profiles').update({ is_admin: true }).eq('id', currentUser.id);
+            userProfile.is_admin = true;
+          } catch (e) {
+            console.warn('[Admin elevation notice]:', e);
+          }
+        }
+      }
+
       setProfile(userProfile);
       setMembership(userMember);
       setMembershipRequest(userReq);
 
       // Sync user session state for backward compatibility
-      const role = userProfile?.is_admin
+      const role = (isDesignatedAdmin || userProfile?.is_admin)
         ? 'admin'
         : userMember?.status === 'active'
         ? 'phdy_member'
@@ -126,7 +141,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const isAuthenticated = Boolean(user);
-  const isAdmin = Boolean(profile?.is_admin === true || (user?.user_metadata?.role || '').toLowerCase() === 'admin');
+  const emailLower = (user?.email || profile?.email || '').toLowerCase().trim();
+  const isAdmin = Boolean(profile?.is_admin === true || (user?.user_metadata?.role || '').toLowerCase() === 'admin' || emailLower === 'vyomanautjagadeesh@gmail.com' || emailLower === 'admin@phdy.org');
   const isMember = Boolean(membership?.status === 'active' || isAdmin);
 
   return (

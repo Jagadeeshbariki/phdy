@@ -75,8 +75,13 @@ export const authService = {
       if (errLower.includes('password should be at least')) {
         throw new Error('Password must be at least 6 characters long.');
       }
-      if (errLower.includes('rate limit') || errLower.includes('too many requests')) {
-        throw new Error('Too many attempts. Please wait a minute and try again.');
+      if (
+        errLower.includes('rate limit') || 
+        errLower.includes('too many requests') ||
+        errLower.includes('over_email_send_rate_limit') ||
+        errLower.includes('security purposes')
+      ) {
+        throw new Error('Supabase email verification rate limit reached (1 request per 60 seconds). Please check your email inbox and spam folder, or wait 60 seconds before trying again.');
       }
       throw error;
     }

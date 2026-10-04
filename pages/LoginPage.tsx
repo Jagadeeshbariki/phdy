@@ -174,13 +174,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({ loggedInUser, onLoginSucce
         if (error) {
           const errLower = error.message?.toLowerCase() || '';
           if (errLower.includes("already registered") || errLower.includes("already exists") || errLower.includes("user already registered")) {
-            throw new Error("An account with this email is already registered. Please sign in instead.");
+            throw new Error("This email address is already registered. Please log in.");
           }
           if (errLower.includes("password should be at least")) {
-            throw new Error("Password should be at least 6 characters long.");
+            throw new Error("Password must be at least 6 characters long.");
           }
-          if (errLower.includes("rate limit") || errLower.includes("too many requests")) {
-            throw new Error("Too many attempts. Please wait a minute and try again.");
+          if (
+            errLower.includes("rate limit") || 
+            errLower.includes("too many requests") || 
+            errLower.includes("over_email_send_rate_limit") ||
+            errLower.includes("security purposes")
+          ) {
+            throw new Error("Supabase Auth email rate limit reached (1 request per 60 seconds). If you already submitted, please check your inbox (and spam folder) for the verification link, or switch to Sign In.");
           }
           throw error;
         }
@@ -423,6 +428,64 @@ export const LoginPage: React.FC<LoginPageProps> = ({ loggedInUser, onLoginSucce
                 <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
                 <span>{authError}</span>
               </div>
+              {authError.includes('already registered') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode('login');
+                    setAuthError('');
+                    setAuthSuccess(`Please sign in with your password.`);
+                  }}
+                  className="mt-2 text-xs font-bold text-orange-700 underline hover:text-orange-900 block"
+                >
+                  Switch to Sign In &rarr;
+                </button>
+              )}
+              {authError.includes('rate limit') && (
+                <div className="pt-2 space-y-2">
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 leading-relaxed">
+                    <p className="font-bold text-amber-950 mb-1">ℹ️ Why is this happening in Supabase?</p>
+                    <p>
+                      Supabase's built-in free email service has an hourly rate limit (approx. 3-4 emails/hr). When this limit is reached, Supabase blocks sending further emails.
+                    </p>
+                    <p className="mt-1 font-semibold text-amber-900">
+                      💡 Quick Fix in Supabase Dashboard:
+                    </p>
+                    <ol className="list-decimal ml-4 mt-0.5 space-y-0.5">
+                      <li>Open your <strong>Supabase Dashboard</strong></li>
+                      <li>Go to <strong>Authentication &rarr; Providers &rarr; Email</strong></li>
+                      <li>Turn OFF <strong>"Confirm email"</strong> and click <strong>Save</strong></li>
+                    </ol>
+                    <p className="mt-1 text-[10px] text-amber-800">
+                      (Turning off email confirmation will allow immediate registrations into <code className="bg-amber-100 px-1 py-0.5 rounded font-mono">auth.users</code> without email rate-limiting).
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMode('login');
+                        setAuthError('');
+                        setAuthSuccess(`Try signing in if your account is already active.`);
+                      }}
+                      className="px-3 py-1.5 bg-orange-600 text-white rounded-xl text-xs font-bold shadow-sm"
+                    >
+                      Go to Sign In
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthError('');
+                        setAuthSuccess(`Check your inbox and spam folder for any confirmation email already sent.`);
+                      }}
+                      className="px-3 py-1.5 bg-white border border-gray-300 text-gray-700 rounded-xl text-xs font-bold"
+                    >
+                      Check Inbox & Spam
+                    </button>
+                  </div>
+                </div>
+              )}
               {authError.includes('not been confirmed') && loginData.email && (
                 <button
                   type="button"
