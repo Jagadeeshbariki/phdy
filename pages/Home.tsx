@@ -77,6 +77,26 @@ const Home: React.FC<HomeProps> = ({ onNavigate, loggedInUser }) => {
                   <span>Our Story</span>
                 </button>
 
+                {/* Become Member button for registered standard users */}
+                {isTier1User && (
+                  <button 
+                    onClick={() => onNavigate('become-member')}
+                    className="px-8 py-4 bg-orange-600 hover:bg-orange-700 text-white rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105 text-xs md:text-sm shadow-lg shadow-orange-500/20 flex items-center gap-1.5"
+                  >
+                    <span>Become a Member</span>
+                  </button>
+                )}
+
+                {/* My Membership Button for Approved Members */}
+                {isMember && (
+                  <button 
+                    onClick={() => onNavigate('my-membership')}
+                    className="px-8 py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105 text-xs md:text-sm shadow-lg shadow-emerald-500/20"
+                  >
+                    My Membership Card
+                  </button>
+                )}
+
                 {/* Accounting Button for Tier 1 User, Member, Admin */}
                 {!isGuest && (
                   <button 
@@ -87,32 +107,22 @@ const Home: React.FC<HomeProps> = ({ onNavigate, loggedInUser }) => {
                   </button>
                 )}
 
-                {/* Members Button for Tier 2 Member & Admin */}
-                {(isMember || isAdmin) && (
-                  <button 
-                    onClick={() => document.getElementById('members')?.scrollIntoView({ behavior: 'smooth' })}
-                    className="px-8 py-4 bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105 text-xs md:text-sm"
-                  >
-                    Meet the Team
-                  </button>
-                )}
-
-                {/* Tier Dashboard Button for Logged in Users */}
+                {/* Dashboard Button for Logged in Users */}
                 {!isGuest && (
                   <button 
                     onClick={() => onNavigate('dashboard')}
-                    className="px-8 py-4 bg-orange-600/30 hover:bg-orange-600/50 text-orange-400 border border-orange-500/30 rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105 text-xs md:text-sm flex items-center gap-1.5"
+                    className="px-8 py-4 bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105 text-xs md:text-sm"
                   >
-                    <span>Tier Dashboard</span>
+                    Dashboard
                   </button>
                 )}
 
-                {/* Contact Us / Join Us */}
+                {/* Contact Us */}
                 <button 
                   onClick={() => onNavigate('contact')}
                   className="px-8 py-4 bg-white/5 hover:bg-white/10 text-white border border-white/20 rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105 text-xs md:text-sm"
                 >
-                  {isGuest ? 'Join Us' : 'Contact Us'}
+                  Contact Us
                 </button>
               </div>
             </div>

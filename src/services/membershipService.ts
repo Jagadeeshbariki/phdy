@@ -2,7 +2,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 import { MembershipRequest, OfficialMember } from './authService';
 
 export const membershipService = {
-  // 1. Upload Membership Photo to Supabase Storage bucket 'membership-photos'
+  // 1. Upload Membership Photo to Supabase Storage bucket 'member-photos'
   async uploadMembershipPhoto(userId: string, file: File): Promise<string> {
     if (!isSupabaseConfigured()) throw new Error('Supabase is not configured.');
 
@@ -20,32 +20,37 @@ export const membershipService = {
     const fileExt = file.name.split('.').pop() || 'jpg';
     const filePath = `${userId}/profile_${Date.now()}.${fileExt}`;
 
-    // Upload to 'membership-photos' bucket with fallback to 'member-photos' if needed
-    let uploadedBucket = 'membership-photos';
-    let { error: uploadError } = await supabase.storage
-      .from(uploadedBucket)
+    // Upload directly to 'member-photos' bucket
+    const bucketName = 'member-photos';
+    const { error: uploadError } = await supabase.storage
+      .from(bucketName)
       .upload(filePath, file, {
         upsert: true,
         cacheControl: '3600',
       });
 
     if (uploadError) {
-      // Fallback bucket attempt
-      const fallbackBucket = 'member-photos';
-      const { error: fallbackError } = await supabase.storage
-        .from(fallbackBucket)
+      // If member-photos gives an error, try membership-photos as secondary fallback
+      const { error: secondaryError } = await supabase.storage
+        .from('membership-photos')
         .upload(filePath, file, {
           upsert: true,
           cacheControl: '3600',
         });
-      if (fallbackError) {
-        throw new Error(`Photo upload failed: ${uploadError.message}`);
+
+      if (secondaryError) {
+        throw new Error(`Photo upload failed: ${uploadError.message}. Please make sure the 'member-photos' bucket is created and set to Public in your Supabase Storage.`);
       }
-      uploadedBucket = fallbackBucket;
+
+      const { data } = supabase.storage
+        .from('membership-photos')
+        .getPublicUrl(filePath);
+
+      return data.publicUrl;
     }
 
     const { data: { publicUrl } } = supabase.storage
-      .from(uploadedBucket)
+      .from(bucketName)
       .getPublicUrl(filePath);
 
     return publicUrl;
