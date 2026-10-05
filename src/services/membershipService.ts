@@ -136,8 +136,9 @@ export const membershipService = {
   async getAllMembershipRequests(filterStatus?: 'pending' | 'approved' | 'rejected' | 'all'): Promise<MembershipRequest[]> {
     if (!isSupabaseConfigured()) return [];
 
+    let rawData: any[] = [];
     try {
-      let query = supabase
+      const { data, error } = await supabase
         .from('membership_requests')
         .select(`
           *,
@@ -151,29 +152,33 @@ export const membershipService = {
         `)
         .order('submitted_at', { ascending: false });
 
-      if (filterStatus && filterStatus !== 'all') {
-        query = query.eq('status', filterStatus);
-      }
-
-      const { data, error } = await query;
       if (!error && data) {
-        return data as MembershipRequest[];
+        rawData = data;
       }
     } catch (e) {}
 
-    // Fallback without relation join or ordering
-    try {
-      let q2 = supabase.from('membership_requests').select('*');
-      if (filterStatus && filterStatus !== 'all') {
-        q2 = q2.eq('status', filterStatus);
-      }
-      const { data, error } = await q2;
-      if (!error && data) {
-        return data as MembershipRequest[];
-      }
-    } catch (e) {}
+    if (rawData.length === 0) {
+      try {
+        const { data } = await supabase.from('membership_requests').select('*');
+        if (data) rawData = data;
+      } catch (e) {}
+    }
 
-    return [];
+    if (filterStatus && filterStatus !== 'all') {
+      const target = filterStatus.toLowerCase();
+      rawData = rawData.filter(r => {
+        const st = String(r.status || 'pending').toLowerCase();
+        if (target === 'pending') {
+          return st === 'pending' || st === 'in progress' || st === 'review';
+        }
+        if (target === 'approved') {
+          return st === 'approved' || st === 'active' || st === 'accepted';
+        }
+        return st === target;
+      });
+    }
+
+    return rawData as MembershipRequest[];
   },
 
   // 4. Admin: Approve Membership Request (Calls Atomic Supabase RPC `approve_membership_request`)
