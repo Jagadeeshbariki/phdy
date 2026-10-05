@@ -41,45 +41,51 @@ const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavClick, onLogout }) =>
   // 4. Admin: All above + Admin Portal
   const navItems: { id: Page; label: string }[] = [];
 
-  // Home (All users)
-  navItems.push({ id: 'home', label: 'Home' });
-
-  // Dashboard (Authenticated users)
-  if (user) {
+  if (!user) {
+    // 1. Unregistered users: Home, Village Map, Contact Us only
+    navItems.push({ id: 'home', label: 'Home' });
+    navItems.push({ id: 'villagemap', label: 'Village Map' });
+    navItems.push({ id: 'contact', label: 'Contact Us' });
+  } else if (isAdmin) {
+    // 4. Admin: Show all sections
+    navItems.push({ id: 'home', label: 'Home' });
     navItems.push({ id: 'dashboard', label: 'Dashboard' });
-  }
-
-  // Members Directory (All users can view official members)
-  navItems.push({ id: 'members', label: 'Members' });
-
-  // Village Map (All users)
-  navItems.push({ id: 'villagemap', label: 'Village Map' });
-
-  // Our Works (All users)
-  navItems.push({ id: 'ourworks', label: 'Our Works' });
-
-  // Membership Actions based on authentic membership state
-  if (user) {
-    if (membership && membership.status === 'active') {
-      navItems.push({ id: 'my-membership', label: 'My Membership' });
-      navItems.push({ id: 'internal', label: 'PHDY Internal' });
-    } else if (membershipRequest && (membershipRequest.status === 'pending' || membershipRequest.status === 'rejected')) {
+    navItems.push({ id: 'members', label: 'Members' });
+    navItems.push({ id: 'villagemap', label: 'Village Map' });
+    navItems.push({ id: 'ourworks', label: 'Our Works' });
+    navItems.push({ id: 'accounting', label: 'Accounting' });
+    navItems.push({ id: 'my-membership', label: 'My Membership' });
+    navItems.push({ id: 'internal', label: 'PHDY Internal' });
+    navItems.push({ id: 'admin', label: 'Admin Portal' });
+    navItems.push({ id: 'contact', label: 'Contact Us' });
+  } else if (isMember) {
+    // 3. PHDY Member: Home, Members, Village Map, Accounting, My Membership, PHDY Internal, Contact Us
+    navItems.push({ id: 'home', label: 'Home' });
+    navItems.push({ id: 'dashboard', label: 'Dashboard' });
+    navItems.push({ id: 'members', label: 'Members' });
+    navItems.push({ id: 'villagemap', label: 'Village Map' });
+    navItems.push({ id: 'ourworks', label: 'Our Works' });
+    navItems.push({ id: 'accounting', label: 'Accounting' });
+    navItems.push({ id: 'my-membership', label: 'My Membership' });
+    navItems.push({ id: 'internal', label: 'PHDY Internal' });
+    navItems.push({ id: 'contact', label: 'Contact Us' });
+  } else {
+    // 2. Registered user: Home, Members, Village Map, Accounting, Become Member, Contact Us
+    navItems.push({ id: 'home', label: 'Home' });
+    navItems.push({ id: 'dashboard', label: 'Dashboard' });
+    navItems.push({ id: 'members', label: 'Members' });
+    navItems.push({ id: 'villagemap', label: 'Village Map' });
+    navItems.push({ id: 'ourworks', label: 'Our Works' });
+    navItems.push({ id: 'accounting', label: 'Accounting' });
+    
+    if (membershipRequest && (membershipRequest.status === 'pending' || membershipRequest.status === 'rejected' || membershipRequest.status === 'Pending' || membershipRequest.status === 'Rejected')) {
       navItems.push({ id: 'membership-status', label: 'Membership Status' });
     } else {
       navItems.push({ id: 'become-member', label: 'Become Member' });
     }
+
+    navItems.push({ id: 'contact', label: 'Contact Us' });
   }
-
-  // Accounting (All users)
-  navItems.push({ id: 'accounting', label: 'Accounting' });
-
-  // Admin Portal (Admin only)
-  if (isAdmin) {
-    navItems.push({ id: 'admin', label: 'Admin Portal' });
-  }
-
-  // Contact Us (All users)
-  navItems.push({ id: 'contact', label: 'Contact Us' });
 
   const handleMobileNavClick = (page: Page) => {
     onNavClick(page);
