@@ -1097,27 +1097,28 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
       let supaUpdated = false;
       if (isSupabaseConfigured()) {
         try {
-          // Update membership_requests by ID, user_id, Email, or Phone to guarantee database record update
-          if (req.id) {
-            await supabase.from('membership_requests').update({ status: 'approved' }).eq('id', req.id);
-            const { error: err1 } = await supabase.from('membership_requests').update({ status: 'Approved' }).eq('id', req.id);
-            if (!err1) supaUpdated = true;
-          }
-          if (req.user_id) {
-            await supabase.from('membership_requests').update({ status: 'approved' }).eq('user_id', req.user_id);
-            await supabase.from('membership_requests').update({ status: 'Approved' }).eq('user_id', req.user_id);
+          if (req.id && String(req.id).length > 5) {
+            await membershipService.updateRequestStatus(req.id, 'Approved');
             supaUpdated = true;
           }
+
+          // Also guarantee update across ID, user_id, email, and phone
+          const updatePayload = { status: 'approved', reviewed_at: new Date().toISOString() };
+          if (req.id) {
+            await supabase.from('membership_requests').update(updatePayload).eq('id', req.id);
+            await supabase.from('membership_requests').update({ status: 'Approved' }).eq('id', req.id);
+          }
+          if (req.user_id) {
+            await supabase.from('membership_requests').update(updatePayload).eq('user_id', req.user_id);
+          }
           if (finalEmailLower) {
-            await supabase.from('membership_requests').update({ status: 'approved' }).eq('email', finalEmailLower);
-            await supabase.from('membership_requests').update({ status: 'approved' }).ilike('email', finalEmailLower);
-            const { error: err2 } = await supabase.from('membership_requests').update({ status: 'Approved' }).eq('email', finalEmailLower);
-            if (!err2) supaUpdated = true;
+            await supabase.from('membership_requests').update(updatePayload).eq('email', finalEmailLower);
+            await supabase.from('membership_requests').update(updatePayload).ilike('email', finalEmailLower);
           }
           if (req.phone) {
-            await supabase.from('membership_requests').update({ status: 'approved' }).eq('phone', req.phone);
-            await supabase.from('membership_requests').update({ status: 'Approved' }).eq('phone', req.phone);
+            await supabase.from('membership_requests').update(updatePayload).eq('phone', req.phone);
           }
+          supaUpdated = true;
 
           // Add to members table directly with schema-accurate payload and guaranteed user_id
           try {

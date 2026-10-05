@@ -232,34 +232,25 @@ export const membershipService = {
 
     const newMember = { id: req.id, full_name: req.profiles?.full_name || 'PHDY Member', membership_number: membershipNumber };
 
-    // Update status in `membership_requests` securely and robustly
+    // Update status in `membership_requests` securely and robustly across all identifiers
     try {
-      await supabase
-        .from('membership_requests')
-        .update({
-          status: 'approved',
-          reviewed_at: now,
-          reviewed_by: adminUserId || null,
-          admin_remarks: 'Approved by Administrator',
-        })
-        .eq('id', requestId);
+      const updatePayload = {
+        status: 'approved',
+        reviewed_at: now,
+        reviewed_by: adminUserId || null,
+        admin_remarks: 'Approved by Administrator',
+      };
 
-      await supabase
-        .from('membership_requests')
-        .update({
-          status: 'Approved',
-          reviewed_at: now,
-        })
-        .eq('id', requestId);
-
+      await supabase.from('membership_requests').update(updatePayload).eq('id', requestId);
       if (req.user_id) {
-        await supabase
-          .from('membership_requests')
-          .update({
-            status: 'approved',
-            reviewed_at: now,
-          })
-          .eq('user_id', req.user_id);
+        await supabase.from('membership_requests').update(updatePayload).eq('user_id', req.user_id);
+      }
+      if (req.email) {
+        await supabase.from('membership_requests').update(updatePayload).eq('email', req.email);
+        await supabase.from('membership_requests').update(updatePayload).ilike('email', req.email);
+      }
+      if (req.phone) {
+        await supabase.from('membership_requests').update(updatePayload).eq('phone', req.phone);
       }
     } catch (e) {
       console.warn('membership_requests update warning:', e);
