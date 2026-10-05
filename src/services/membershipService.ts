@@ -91,6 +91,20 @@ export const membershipService = {
       throw new Error('You already have a membership application under review.');
     }
 
+    // Ensure profile exists in `profiles` to satisfy foreign key constraint on membership_requests
+    if (params.userId) {
+      try {
+        const { data: prof } = await supabase.from('profiles').select('id').eq('id', params.userId).maybeSingle();
+        if (!prof?.id) {
+          await supabase.from('profiles').upsert({
+            id: params.userId,
+            email: params.email || null,
+            full_name: params.email ? params.email.split('@')[0] : 'PHDY Member',
+          }, { onConflict: 'id' });
+        }
+      } catch (e) {}
+    }
+
     // Insert or update request in `membership_requests`
     const { data, error } = await supabase
       .from('membership_requests')
@@ -195,22 +209,11 @@ export const membershipService = {
     const membershipNumber = `PHDY-${randomDigits}`;
     const now = new Date().toISOString();
 
-    // Insert into `members` table safely (non-blocking if members schema cache has 400 error)
+    // Insert into `members` table without user_id foreign key constraint issues
     try {
       const dobValue = req.date_of_birth && String(req.date_of_birth).trim() !== '' ? String(req.date_of_birth).split('T')[0] : null;
-      let userIdValue = req.user_id && String(req.user_id).length > 10 ? req.user_id : null;
-      if (!userIdValue && (req.email || req.profiles?.email)) {
-        try {
-          const { data } = await supabase.from('profiles').select('id').eq('email', req.email || req.profiles?.email).maybeSingle();
-          if (data?.id) userIdValue = data.id;
-        } catch {}
-      }
-      if (!userIdValue) {
-        userIdValue = '00000000-0000-0000-0000-000000000001';
-      }
 
       const payload: any = {
-        user_id: userIdValue,
         membership_number: membershipNumber,
         full_name: req.profiles?.full_name || req.full_name || 'PHDY Member',
         phone: req.phone || null,
@@ -219,6 +222,15 @@ export const membershipService = {
       };
       if (dobValue) payload.date_of_birth = dobValue;
       if (req.photo_url) payload.photo_url = req.photo_url;
+
+      if (req.user_id && String(req.user_id).length > 10) {
+        try {
+          const { data: prof } = await supabase.from('profiles').select('id').eq('id', req.user_id).maybeSingle();
+          if (prof?.id) {
+            payload.user_id = prof.id;
+          }
+        } catch {}
+      }
 
       await supabase.from('members').insert([payload]);
     } catch (e) {
