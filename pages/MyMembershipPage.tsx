@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { useAuth } from '../src/auth/AuthProvider';
 import { Page } from '../App';
+import html2canvas from 'html2canvas';
 import { 
   Award, 
   ShieldCheck, 
@@ -21,6 +22,30 @@ interface MyMembershipPageProps {
 
 export const MyMembershipPage: React.FC<MyMembershipPageProps> = ({ onNavigate }) => {
   const { user, profile, membership, loading, isAuthenticated } = useAuth();
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handleDownloadCard = async () => {
+    if (!cardRef.current) return;
+    setIsDownloading(true);
+    try {
+      const canvas = await html2canvas(cardRef.current, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: null
+      });
+      const image = canvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.href = image;
+      link.download = `PHDY_Member_Card_${membership?.membership_number || 'ID'}.png`;
+      link.click();
+    } catch (e) {
+      console.error('Download card error:', e);
+      window.print();
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -86,16 +111,17 @@ export const MyMembershipPage: React.FC<MyMembershipPageProps> = ({ onNavigate }
         </div>
         
         <button
-          onClick={() => window.print()}
-          className="px-5 py-2.5 bg-white border border-gray-200 hover:border-gray-300 text-gray-700 rounded-xl font-bold text-xs flex items-center gap-2 shadow-sm transition-all"
+          onClick={handleDownloadCard}
+          disabled={isDownloading}
+          className="px-5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md shadow-orange-200 transition-all disabled:opacity-50"
         >
-          <Download className="w-4 h-4 text-gray-500" />
-          <span>Print / Save ID</span>
+          <Download className="w-4 h-4" />
+          <span>{isDownloading ? 'Generating PNG...' : 'Download ID Card (PNG)'}</span>
         </button>
       </div>
 
       {/* Official Digital Membership Card */}
-      <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-orange-950 rounded-3xl p-6 sm:p-8 text-white shadow-2xl relative overflow-hidden border border-slate-700 mb-8">
+      <div ref={cardRef} className="bg-gradient-to-br from-slate-900 via-slate-800 to-orange-950 rounded-3xl p-6 sm:p-8 text-white shadow-2xl relative overflow-hidden border border-slate-700 mb-8">
         {/* Decorative background watermark */}
         <div className="absolute -right-16 -bottom-16 opacity-10 pointer-events-none">
           <Award className="w-80 h-80 text-orange-500" />

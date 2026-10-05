@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import html2canvas from 'html2canvas';
 import { 
   RefreshCw, 
   ShieldCheck, 
@@ -21,7 +22,10 @@ import {
   ShieldAlert,
   Camera,
   KeyRound,
-  Copy
+  Copy,
+  Award,
+  Download,
+  User
 } from 'lucide-react';
 import { LoggedInUser } from '../App';
 import { WORKS_DATA } from '../constants';
@@ -140,6 +144,27 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
   const [adminResetModalUser, setAdminResetModalUser] = useState<SystemUserRecord | null>(null);
   const [adminNewPassword, setAdminNewPassword] = useState<string>('');
   const [adminResetSuccess, setAdminResetSuccess] = useState<string>('');
+  const [selectedMemberForCard, setSelectedMemberForCard] = useState<any | null>(null);
+  const adminCardRef = useRef<HTMLDivElement>(null);
+
+  const handleDownloadAdminCard = async () => {
+    if (!adminCardRef.current || !selectedMemberForCard) return;
+    try {
+      const canvas = await html2canvas(adminCardRef.current, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: null
+      });
+      const image = canvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.href = image;
+      link.download = `PHDY_Member_Card_${selectedMemberForCard.Name || 'Member'}.png`;
+      link.click();
+    } catch (e) {
+      console.error('Admin download card error:', e);
+      window.print();
+    }
+  };
   
   // Add user modal states
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
@@ -1740,7 +1765,15 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                             </span>
                           </td>
                           <td className="py-4 text-right">
-                            <div className="flex justify-end items-center gap-4">
+                            <div className="flex justify-end items-center gap-3">
+                              <button 
+                                onClick={() => setSelectedMemberForCard(m)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-600 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border border-orange-100"
+                                title="View / Download ID Card"
+                              >
+                                <Award className="w-3.5 h-3.5" />
+                                <span>ID Card</span>
+                              </button>
                               <button 
                                 onClick={() => {
                                   setUpdatingMemberEmail(m.Email || m.email || m.Name);
@@ -2879,6 +2912,114 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
                 <p className="text-gray-500 text-sm">Your password has been updated.</p>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Admin Member ID Card Modal */}
+      {selectedMemberForCard && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/70 backdrop-blur-sm p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl relative">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-black text-gray-950">Official Member ID Card</h3>
+              <button 
+                onClick={() => setSelectedMemberForCard(null)}
+                className="p-2 text-gray-400 hover:text-gray-600 rounded-xl"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div ref={adminCardRef} className="bg-gradient-to-br from-slate-900 via-slate-800 to-orange-950 rounded-3xl p-6 sm:p-8 text-white shadow-2xl relative overflow-hidden border border-slate-700 mb-6">
+              <div className="absolute -right-16 -bottom-16 opacity-10 pointer-events-none">
+                <Award className="w-80 h-80 text-orange-500" />
+              </div>
+              <div className="flex items-center justify-between border-b border-slate-700/60 pb-6 mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center p-1 shadow-md">
+                    <img 
+                      src="https://res.cloudinary.com/dbohmpxko/image/upload/v1729417549/LogoWithoutBG_qzoqus.png" 
+                      alt="PHDY" 
+                      className="w-10 h-10 object-contain"
+                    />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-black tracking-tight text-white leading-tight">
+                      Pedda Harivanam Development Youth
+                    </h2>
+                    <p className="text-[11px] font-bold text-orange-400 uppercase tracking-widest">
+                      Official Digital Member Card
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="inline-block px-3 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[10px] font-black uppercase tracking-widest rounded-full">
+                    Active
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
+                <div className="relative w-32 h-32 rounded-2xl overflow-hidden bg-slate-800 border-2 border-orange-500/40 shadow-xl flex-shrink-0 flex items-center justify-center">
+                  {selectedMemberForCard.ImageURL ? (
+                    <img 
+                      src={selectedMemberForCard.ImageURL} 
+                      alt={selectedMemberForCard.Name} 
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <User className="w-16 h-16 text-slate-500" />
+                  )}
+                </div>
+                <div className="flex-grow space-y-4 text-center sm:text-left">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block">
+                      Member Full Name
+                    </span>
+                    <h3 className="text-xl font-black text-white tracking-tight">
+                      {selectedMemberForCard.Name}
+                    </h3>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-800">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-orange-400 block">
+                        Membership No.
+                      </span>
+                      <span className="text-sm font-black font-mono tracking-wider text-white">
+                        {selectedMemberForCard["Id.No"] || 'PHDY-MEMBER'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block">
+                        Qualification
+                      </span>
+                      <span className="text-xs font-bold text-slate-200">
+                        {selectedMemberForCard.Qualification || 'Youth Leader'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-6 pt-4 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
+                <span>Pedda Harivanam Village, Adoni Mandal, Kurnool Dist.</span>
+                <span className="font-mono text-orange-400/80">phdy.org</span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button 
+                onClick={() => setSelectedMemberForCard(null)}
+                className="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-xs"
+              >
+                Close
+              </button>
+              <button 
+                onClick={handleDownloadAdminCard}
+                className="px-6 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md shadow-orange-200"
+              >
+                <Download className="w-4 h-4" />
+                <span>Download PNG</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
