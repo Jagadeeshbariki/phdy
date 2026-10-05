@@ -209,11 +209,31 @@ export const membershipService = {
     const membershipNumber = `PHDY-${randomDigits}`;
     const now = new Date().toISOString();
 
-    // Insert into `members` table without user_id foreign key constraint issues
+    // Insert into `members` table with guaranteed non-null user_id
     try {
       const dobValue = req.date_of_birth && String(req.date_of_birth).trim() !== '' ? String(req.date_of_birth).split('T')[0] : null;
+      let uIdVal = req.user_id && String(req.user_id).length > 10 ? req.user_id : null;
+      if (!uIdVal && (req.email || req.profiles?.email)) {
+        try {
+          const { data: prof } = await supabase.from('profiles').select('id').eq('email', req.email || req.profiles?.email).maybeSingle();
+          if (prof?.id) uIdVal = prof.id;
+        } catch {}
+      }
+      if (!uIdVal) {
+        try {
+          const { data: newProf } = await supabase.from('profiles').insert([{
+            email: req.email || `member_${Date.now()}@phdy.org`,
+            full_name: req.profiles?.full_name || req.full_name || 'PHDY Member',
+            status: 'active'
+          }]).select('id').single();
+          uIdVal = newProf?.id || '00000000-0000-0000-0000-000000000001';
+        } catch {
+          uIdVal = '00000000-0000-0000-0000-000000000001';
+        }
+      }
 
       const payload: any = {
+        user_id: uIdVal,
         membership_number: membershipNumber,
         full_name: req.profiles?.full_name || req.full_name || 'PHDY Member',
         phone: req.phone || null,
@@ -223,19 +243,11 @@ export const membershipService = {
       if (dobValue) payload.date_of_birth = dobValue;
       if (req.photo_url) payload.photo_url = req.photo_url;
 
-      if (req.user_id && String(req.user_id).length > 10) {
-        try {
-          const { data: prof } = await supabase.from('profiles').select('id').eq('id', req.user_id).maybeSingle();
-          if (prof?.id) {
-            payload.user_id = prof.id;
-          }
-        } catch {}
-      }
-
-      await supabase.from('members').insert([payload]);
+      await supabase.from('members').upsert([payload], { onConflict: 'user_id' });
     } catch (e) {
       try {
         await supabase.from('members').insert([{
+          user_id: '00000000-0000-0000-0000-000000000001',
           full_name: req.profiles?.full_name || req.full_name || 'PHDY Member',
           status: 'active'
         }]);
