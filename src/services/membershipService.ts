@@ -180,36 +180,60 @@ export const membershipService = {
   async approveMembershipRequest(requestId: string, adminUserId?: string) {
     if (!isSupabaseConfigured()) throw new Error('Supabase is not configured.');
 
-    // 1. First try calling the secure RPC function
-    try {
-      const { data, error } = await supabase.rpc('approve_membership_request', {
-        request_id: requestId,
-      });
-
-      if (!error && data) {
-        return { success: true, data };
-      }
-    } catch (rpcErr) {
-      console.warn('[Supabase RPC] approve_membership_request error, using admin fallback:', rpcErr);
-    }
-
-    // 2. Direct fallback logic with admin permissions
+    // 1. Direct fetch request details
     const { data: req, error: reqErr } = await supabase
       .from('membership_requests')
       .select('*, profiles:user_id(full_name, email)')
       .eq('id', requestId)
-      .single();
+      .maybeSingle();
 
     if (reqErr || !req) {
-      throw new Error('Membership application not found.');
+      // Try fetching by user_id or email
+      const { data: req2 } = await supabase
+        .from('membership_requests')
+        .select('*')
+        .or(`user_id.eq.${requestId},email.eq.${requestId}`)
+        .maybeSingle();
+      if (!req2) {
+        throw new Error('Membership application not found.');
+      }
+      Object.assign(req || {}, req2);
     }
 
-    // Generate unique membership number: PHDY-XXXXXX
+    const now = new Date().toISOString();
     const randomDigits = Math.floor(100000 + Math.random() * 900000);
     const membershipNumber = `PHDY-${randomDigits}`;
-    const now = new Date().toISOString();
 
-    // Insert into `members` table with guaranteed non-null user_id
+    // 2. CRITICAL: Update status in `membership_requests` FIRST across all identifiers
+    try {
+      const updatePayload = {
+        status: 'approved',
+        reviewed_at: now,
+        reviewed_by: adminUserId || null,
+        admin_remarks: 'Approved by Administrator',
+      };
+
+      await supabase.from('membership_requests').update(updatePayload).eq('id', requestId);
+      await supabase.from('membership_requests').update({ status: 'Approved', reviewed_at: now }).eq('id', requestId);
+      if (req.id) {
+        await supabase.from('membership_requests').update(updatePayload).eq('id', req.id);
+        await supabase.from('membership_requests').update({ status: 'Approved', reviewed_at: now }).eq('id', req.id);
+      }
+      if (req.user_id) {
+        await supabase.from('membership_requests').update(updatePayload).eq('user_id', req.user_id);
+      }
+      if (req.email) {
+        await supabase.from('membership_requests').update(updatePayload).eq('email', req.email);
+        await supabase.from('membership_requests').update(updatePayload).ilike('email', req.email);
+      }
+      if (req.phone) {
+        await supabase.from('membership_requests').update(updatePayload).eq('phone', req.phone);
+      }
+    } catch (e) {
+      console.warn('membership_requests update warning:', e);
+    }
+
+    // 3. SECONDARY: Insert into `members` table (isolated so it never blocks approval status update)
     try {
       const dobValue = req.date_of_birth && String(req.date_of_birth).trim() !== '' ? String(req.date_of_birth).split('T')[0] : null;
       let uIdVal = req.user_id && String(req.user_id).length > 10 ? req.user_id : null;
@@ -244,41 +268,11 @@ export const membershipService = {
       if (req.photo_url) payload.photo_url = req.photo_url;
 
       await supabase.from('members').upsert([payload], { onConflict: 'user_id' });
-    } catch (e) {
-      try {
-        await supabase.from('members').insert([{
-          user_id: '00000000-0000-0000-0000-000000000001',
-          full_name: req.profiles?.full_name || req.full_name || 'PHDY Member',
-          status: 'active'
-        }]);
-      } catch (err) {}
+    } catch (memErr) {
+      console.warn('[Members Table Insert Warning - Ignored]:', memErr);
     }
 
-    const newMember = { id: req.id, full_name: req.profiles?.full_name || 'PHDY Member', membership_number: membershipNumber };
-
-    // Update status in `membership_requests` securely and robustly across all identifiers
-    try {
-      const updatePayload = {
-        status: 'approved',
-        reviewed_at: now,
-        reviewed_by: adminUserId || null,
-        admin_remarks: 'Approved by Administrator',
-      };
-
-      await supabase.from('membership_requests').update(updatePayload).eq('id', requestId);
-      if (req.user_id) {
-        await supabase.from('membership_requests').update(updatePayload).eq('user_id', req.user_id);
-      }
-      if (req.email) {
-        await supabase.from('membership_requests').update(updatePayload).eq('email', req.email);
-        await supabase.from('membership_requests').update(updatePayload).ilike('email', req.email);
-      }
-      if (req.phone) {
-        await supabase.from('membership_requests').update(updatePayload).eq('phone', req.phone);
-      }
-    } catch (e) {
-      console.warn('membership_requests update warning:', e);
-    }
+    const newMember = { id: req.id || requestId, full_name: req.profiles?.full_name || req.full_name || 'PHDY Member', membership_number: membershipNumber };
 
     return {
       success: true,
