@@ -212,7 +212,7 @@ export const membershipService = {
     // 2. CRITICAL: Update status in `membership_requests` FIRST across all identifiers
     try {
       const updatePayload = {
-        status: 'approved',
+        status: 'Approved',
         reviewed_at: now,
         reviewed_by: adminUserId || null,
         admin_remarks: 'Approved by Administrator',

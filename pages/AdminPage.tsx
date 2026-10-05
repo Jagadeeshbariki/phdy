@@ -1103,7 +1103,7 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
           }
 
           // Also guarantee update across ID, user_id, email, and phone
-          const updatePayload = { status: 'approved', reviewed_at: new Date().toISOString() };
+          const updatePayload = { status: 'Approved', reviewed_at: new Date().toISOString() };
           if (req.id) {
             await supabase.from('membership_requests').update(updatePayload).eq('id', req.id);
             await supabase.from('membership_requests').update({ status: 'Approved' }).eq('id', req.id);
