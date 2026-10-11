@@ -2,7 +2,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { MapContainer, TileLayer, GeoJSON, useMap, LayersControl } from 'react-leaflet';
-import { isSupabaseConfigured, landmarksService } from '../lib/supabaseClient';
+import { isSupabaseConfigured, landmarksService, gisLayersService } from '../lib/supabaseClient';
+import { useAuth } from '../src/auth/AuthProvider';
 
 // Fix for default marker icons in Leaflet when using build tools
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -140,9 +141,43 @@ const MapResizer: React.FC<{ isFullscreen: boolean }> = ({ isFullscreen }) => {
   return null;
 };
 
+const mergeGeoJsonFeatures = (existingCollection: any, newCollection: any) => {
+  if (!existingCollection || !existingCollection.features) {
+    return newCollection;
+  }
+  const mergedFeatures = [...existingCollection.features];
+  
+  for (const newFeat of newCollection.features || []) {
+    const newId = newFeat.properties?.id || newFeat.properties?.Name || newFeat.properties?.name;
+    const existingIndex = mergedFeatures.findIndex(f => {
+      const exId = f.properties?.id || f.properties?.Name || f.properties?.name;
+      return newId && exId && String(exId).trim().toLowerCase() === String(newId).trim().toLowerCase();
+    });
+
+    if (existingIndex >= 0) {
+      mergedFeatures[existingIndex] = {
+        ...mergedFeatures[existingIndex],
+        ...newFeat,
+        properties: {
+          ...mergedFeatures[existingIndex].properties,
+          ...newFeat.properties
+        }
+      };
+    } else {
+      mergedFeatures.push(newFeat);
+    }
+  }
+
+  return {
+    ...newCollection,
+    features: mergedFeatures
+  };
+};
+
 const VillageMapPage: React.FC = () => {
   const [pointData, setPointData] = useState<any>(DEFAULT_POINTS_GEOJSON);
   const [boundaryData, setBoundaryData] = useState<any>(null);
+  const [lineData, setLineData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -150,6 +185,65 @@ const VillageMapPage: React.FC = () => {
   const [showUrlModal, setShowUrlModal] = useState(false);
   const [selectedPoint, setSelectedPoint] = useState<[number, number] | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { isAdmin } = useAuth();
+  const [showAdminUploadModal, setShowAdminUploadModal] = useState(false);
+  const [uploadLayerType, setUploadLayerType] = useState<'points' | 'polygons' | 'lines'>('points');
+  const [uploadStatusMsg, setUploadStatusMsg] = useState('');
+
+  const handleAdminGeoJsonMergeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const newCollection = JSON.parse(text);
+      if (!newCollection.type || !Array.isArray(newCollection.features)) {
+        throw new Error('Invalid GeoJSON FeatureCollection structure.');
+      }
+
+      let existing = null;
+      if (uploadLayerType === 'points') existing = pointData;
+      else if (uploadLayerType === 'polygons') existing = boundaryData;
+      else if (uploadLayerType === 'lines') existing = lineData;
+
+      const merged = mergeGeoJsonFeatures(existing, newCollection);
+      const mergedString = JSON.stringify(merged);
+
+      await gisLayersService.saveLayer(uploadLayerType, mergedString);
+
+      if (uploadLayerType === 'points') setPointData(merged);
+      else if (uploadLayerType === 'polygons') setBoundaryData(merged);
+      else if (uploadLayerType === 'lines') setLineData(merged);
+
+      setUploadStatusMsg(`Successfully merged & updated ${uploadLayerType.toUpperCase()}! Features: ${merged.features.length}`);
+      setTimeout(() => {
+        setUploadStatusMsg('');
+        setShowAdminUploadModal(false);
+      }, 3000);
+    } catch (err: any) {
+      setUploadStatusMsg(`Upload error: ${err.message}`);
+    }
+  };
+
+  useEffect(() => {
+    const loadCustomLayers = async () => {
+      try {
+        const customPoints = await gisLayersService.loadLayer('points');
+        if (customPoints && customPoints.features) {
+          setPointData(customPoints);
+        }
+        const customPolygons = await gisLayersService.loadLayer('polygons');
+        if (customPolygons && customPolygons.features) {
+          setBoundaryData(customPolygons);
+        }
+        const customLines = await gisLayersService.loadLayer('lines');
+        if (customLines && customLines.features) {
+          setLineData(customLines);
+        }
+      } catch (e) {}
+    };
+    loadCustomLayers();
+  }, []);
 
   // Fetch Point Data from Google Drive or local fallback with HTML guard
   const fetchPointData = async (url: string) => {
@@ -350,6 +444,16 @@ const VillageMapPage: React.FC = () => {
                 </svg>
                 Data Source
               </button>
+
+              {isAdmin && (
+                <button
+                  onClick={() => setShowAdminUploadModal(true)}
+                  className="bg-emerald-500 hover:bg-emerald-600 text-white font-black px-4 py-2 rounded-2xl text-xs uppercase tracking-wider shadow-lg transition-all flex items-center gap-2 cursor-pointer"
+                  title="Admin: Upload & Merge GeoJSON Layers"
+                >
+                  <span>🛡️ Admin: Upload & Merge</span>
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -519,6 +623,31 @@ const VillageMapPage: React.FC = () => {
                       layer.bindTooltip(`
                         <div style="font-weight: 700; color: #c2410c;">
                           📌 ${village} (Official Boundary Limit)
+                        </div>
+                      `, {
+                        sticky: true,
+                        className: 'custom-map-tooltip'
+                      });
+                    }}
+                  />
+                </LayersControl.Overlay>
+              )}
+
+              {/* 3. Line Data Layer (Roads / Canals / Paths) */}
+              {lineData && lineData.features && lineData.features.length > 0 && (
+                <LayersControl.Overlay checked name="Village GIS Lines (Roads / Canals)">
+                  <GeoJSON 
+                    data={lineData}
+                    style={() => ({
+                      color: '#0284c7',
+                      weight: 3.5,
+                      opacity: 0.85
+                    })}
+                    onEachFeature={(feature, layer) => {
+                      const name = feature.properties?.Name || feature.properties?.name || 'Road / Feature';
+                      layer.bindTooltip(`
+                        <div style="font-weight: 700; color: #0284c7;">
+                          🛣️ ${name}
                         </div>
                       `, {
                         sticky: true,
@@ -722,9 +851,88 @@ const VillageMapPage: React.FC = () => {
                   </div>
                 </div>
               </form>
+          </div>
+        </div>
+      )}
+
+
+      {/* Admin GeoJSON Upload & Merge Modal */}
+      {showAdminUploadModal && (
+        <div className="fixed inset-0 z-[1005] flex items-center justify-center bg-gray-950/70 backdrop-blur-sm p-4 animate-fadeIn">
+          <div className="bg-white rounded-[32px] max-w-lg w-full p-8 shadow-2xl relative border border-emerald-100">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center font-black">
+                  GIS
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-gray-900">Admin GeoJSON Merge & Update</h3>
+                  <p className="text-xs text-gray-500">Upload new GeoJSON to merge and update existing map data.</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowAdminUploadModal(false)}
+                className="p-2 text-gray-400 hover:text-gray-600 rounded-xl cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-5">
+              <div>
+                <label className="block text-xs font-black uppercase text-gray-700 mb-2">Select GeoJSON Layer Type</label>
+                <div className="grid grid-cols-3 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setUploadLayerType('points')}
+                    className={`py-2.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all border cursor-pointer ${uploadLayerType === 'points' ? 'bg-orange-600 text-white border-orange-600 shadow-md' : 'bg-gray-50 text-gray-600 border-gray-200'}`}
+                  >
+                    📍 Points
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUploadLayerType('polygons')}
+                    className={`py-2.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all border cursor-pointer ${uploadLayerType === 'polygons' ? 'bg-amber-600 text-white border-amber-600 shadow-md' : 'bg-gray-50 text-gray-600 border-gray-200'}`}
+                  >
+                    🗺️ Boundary
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUploadLayerType('lines')}
+                    className={`py-2.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all border cursor-pointer ${uploadLayerType === 'lines' ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-gray-50 text-gray-600 border-gray-200'}`}
+                  >
+                    🛣️ Lines
+                  </button>
+                </div>
+              </div>
+
+              {uploadStatusMsg && (
+                <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold">
+                  {uploadStatusMsg}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-black uppercase text-gray-700 mb-2">Upload GeoJSON File (.geojson / .json)</label>
+                <label className="cursor-pointer block text-center p-6 border-2 border-dashed border-gray-300 hover:border-emerald-500 rounded-2xl bg-gray-50 hover:bg-emerald-50/30 transition-all">
+                  <span className="text-sm font-bold text-gray-700 block mb-1">Click to browse or drop file here</span>
+                  <span className="text-[11px] text-gray-400">Smart Merge will update existing features and append new ones automatically</span>
+                  <input type="file" accept=".geojson,.json" className="hidden" onChange={handleAdminGeoJsonMergeUpload} />
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                <button
+                  onClick={() => setShowAdminUploadModal(false)}
+                  className="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-xs cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
       </div>
     </div>

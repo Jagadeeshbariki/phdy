@@ -869,3 +869,34 @@ export const landmarksService = {
     }
   }
 };
+
+export const gisLayersService = {
+  async saveLayer(layerType: 'points' | 'polygons' | 'lines', geoJsonString: string) {
+    localStorage.setItem(`phdy_gis_${layerType}`, geoJsonString);
+    if (!isSupabaseConfigured()) return { success: true };
+    try {
+      await supabase.from('village_gis_layers').upsert({
+        layer_type: layerType,
+        geojson_data: JSON.parse(geoJsonString),
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'layer_type' });
+    } catch (e) {}
+    return { success: true };
+  },
+
+  async loadLayer(layerType: 'points' | 'polygons' | 'lines') {
+    const cached = localStorage.getItem(`phdy_gis_${layerType}`);
+    if (cached) {
+      try { return JSON.parse(cached); } catch {}
+    }
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const { data } = await supabase.from('village_gis_layers').select('geojson_data').eq('layer_type', layerType).maybeSingle();
+      if (data?.geojson_data) {
+        localStorage.setItem(`phdy_gis_${layerType}`, JSON.stringify(data.geojson_data));
+        return data.geojson_data;
+      }
+    } catch {}
+    return null;
+  }
+};

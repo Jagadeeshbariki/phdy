@@ -41,7 +41,8 @@ import {
   supabase, 
   membershipService, 
   villageAccountingService,
-  getAuthRedirectUrl
+  getAuthRedirectUrl,
+  gisLayersService
 } from '../lib/supabaseClient';
 
 const CLOUDINARY_CLOUD_NAME = 'dbohmpxko';
@@ -63,7 +64,7 @@ const formatDisplayDate = (dateStr: string | undefined): string => {
   return `${day}/${month}/${year}`;
 }; 
 
-type AdminTab = 'members' | 'accounting' | 'works' | 'joinRequests' | 'users';
+type AdminTab = 'members' | 'accounting' | 'works' | 'joinRequests' | 'users' | 'gis';
 
 export interface SystemUserRecord {
   name: string;
@@ -144,6 +145,24 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
   const [adminResetModalUser, setAdminResetModalUser] = useState<SystemUserRecord | null>(null);
   const [adminNewPassword, setAdminNewPassword] = useState<string>('');
   const [adminResetSuccess, setAdminResetSuccess] = useState<string>('');
+  const [gisStatus, setGisStatus] = useState<string>('');
+
+  const handleGeoJsonUpload = async (layerType: 'points' | 'polygons' | 'lines', e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const json = JSON.parse(text);
+      if (!json.type || !Array.isArray(json.features)) {
+        throw new Error('Invalid GeoJSON FeatureCollection structure.');
+      }
+      await gisLayersService.saveLayer(layerType, text);
+      setGisStatus(`Successfully uploaded & saved ${layerType.toUpperCase()} GeoJSON layer! (${json.features.length} features)`);
+      setTimeout(() => setGisStatus(''), 6000);
+    } catch (err: any) {
+      setGisStatus(`Error uploading ${layerType}: ${err.message}`);
+    }
+  };
   const [selectedMemberForCard, setSelectedMemberForCard] = useState<any | null>(null);
   const adminCardRef = useRef<HTMLDivElement>(null);
 
@@ -1656,9 +1675,80 @@ const AdminPage: React.FC<AdminPageProps> = ({ loggedInUser, onLoginSuccess, onL
           <button onClick={() => setActiveTab('accounting')} className={`px-8 py-3 rounded-xl font-black uppercase tracking-widest text-sm transition-all whitespace-nowrap ${activeTab === 'accounting' ? 'bg-gray-900 text-white shadow-lg' : 'bg-white text-gray-400 hover:text-gray-700'}`}>Accounting</button>
           <button onClick={() => setActiveTab('joinRequests')} className={`px-8 py-3 rounded-xl font-black uppercase tracking-widest text-sm transition-all whitespace-nowrap ${activeTab === 'joinRequests' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-gray-400 hover:text-gray-700'}`}>Join Requests</button>
           <button onClick={() => setActiveTab('users')} className={`px-8 py-3 rounded-xl font-black uppercase tracking-widest text-sm transition-all whitespace-nowrap ${activeTab === 'users' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-white text-gray-400 hover:text-gray-700'}`}>Manage Users</button>
+          <button onClick={() => setActiveTab('gis')} className={`px-8 py-3 rounded-xl font-black uppercase tracking-widest text-sm transition-all whitespace-nowrap ${activeTab === 'gis' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-white text-gray-400 hover:text-gray-700'}`}>Village Map GIS</button>
         </div>
 
         <div className="transition-all duration-500">
+          {activeTab === 'gis' && (
+            <div className="bg-white rounded-[40px] p-8 md:p-12 shadow-2xl border border-emerald-50 max-w-4xl mx-auto animate-fadeIn space-y-8">
+              <div className="flex items-center gap-4 border-b border-gray-100 pb-6">
+                <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center font-black text-xl">
+                  GIS
+                </div>
+                <div>
+                  <h2 className="text-2xl font-black text-gray-900 tracking-tight">Village Map GeoJSON Upload</h2>
+                  <p className="text-xs text-gray-500 mt-1">Upload GeoJSON files for points (landmarks), polygons (boundaries), and lines (roads/canals) to update the village map interactively.</p>
+                </div>
+              </div>
+
+              {gisStatus && (
+                <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold">
+                  {gisStatus}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* Points Upload */}
+                <div className="bg-gray-50 rounded-3xl p-6 border border-gray-200 flex flex-col justify-between">
+                  <div>
+                    <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center font-bold mb-3">📍</div>
+                    <h3 className="font-black text-gray-900 text-base">Point Data</h3>
+                    <p className="text-xs text-gray-500 mt-1 mb-4">Upload schools, temples, borewells, and landmark markers (.geojson / .json).</p>
+                  </div>
+                  <label className="cursor-pointer block text-center px-4 py-3 bg-orange-600 hover:bg-orange-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md">
+                    <span>Upload Points GeoJSON</span>
+                    <input type="file" accept=".geojson,.json" className="hidden" onChange={(e) => handleGeoJsonUpload('points', e)} />
+                  </label>
+                </div>
+
+                {/* Polygons Upload */}
+                <div className="bg-gray-50 rounded-3xl p-6 border border-gray-200 flex flex-col justify-between">
+                  <div>
+                    <div className="w-10 h-10 bg-amber-100 text-amber-600 rounded-xl flex items-center justify-center font-bold mb-3">🗺️</div>
+                    <h3 className="font-black text-gray-900 text-base">Polygon Boundaries</h3>
+                    <p className="text-xs text-gray-500 mt-1 mb-4">Upload village boundary limits, zones, and land use polygons (.geojson / .json).</p>
+                  </div>
+                  <label className="cursor-pointer block text-center px-4 py-3 bg-amber-600 hover:bg-amber-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md">
+                    <span>Upload Boundary GeoJSON</span>
+                    <input type="file" accept=".geojson,.json" className="hidden" onChange={(e) => handleGeoJsonUpload('polygons', e)} />
+                  </label>
+                </div>
+
+                {/* Lines Upload */}
+                <div className="bg-gray-50 rounded-3xl p-6 border border-gray-200 flex flex-col justify-between">
+                  <div>
+                    <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center font-bold mb-3">🛣️</div>
+                    <h3 className="font-black text-gray-900 text-base">Line Data</h3>
+                    <p className="text-xs text-gray-500 mt-1 mb-4">Upload roads, streets, canals, and pathway lines (.geojson / .json).</p>
+                  </div>
+                  <label className="cursor-pointer block text-center px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md">
+                    <span>Upload Lines GeoJSON</span>
+                    <input type="file" accept=".geojson,.json" className="hidden" onChange={(e) => handleGeoJsonUpload('lines', e)} />
+                  </label>
+                </div>
+              </div>
+
+              <div className="bg-orange-50 border border-orange-200 rounded-3xl p-6 text-xs text-orange-900 space-y-2">
+                <p className="font-bold">💡 How GeoJSON Upload Works:</p>
+                <ul className="list-disc pl-5 space-y-1 text-orange-800">
+                  <li>Uploaded GeoJSON files are saved instantly to Supabase and browser cache.</li>
+                  <li>When visitors open the <b>Village Map</b>, their browser will immediately render your newly uploaded points, polygons, and lines.</li>
+                  <li>Ensure your files follow standard GeoJSON FeatureCollection format with WGS84 coordinates.</li>
+                </ul>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'members' && (
             <div className="space-y-12 animate-fadeIn">
               {/* Member Add Form */}
