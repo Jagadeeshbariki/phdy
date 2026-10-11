@@ -14,14 +14,11 @@
         "id": 1,
         "Name": "Zilla Parisadh High School",
         "type": "High School",
-        "category": "Education"
+        "category": "Secondary Education (ZPHS)"
       },
       "geometry": {
         "type": "Point",
-        "coordinates": [
-          77.10218805934603,
-          15.630581808142665
-        ]
+        "coordinates": [ 77.102188059346034, 15.630581808142665 ]
       }
     },
     {
@@ -29,15 +26,12 @@
       "properties": {
         "id": 2,
         "Name": "M.P.P Kannada School",
-        "type": "Primary School (Kannada)",
-        "category": "Education"
+        "type": "Primary School",
+        "category": "Primary Education (Kannada Medium)"
       },
       "geometry": {
         "type": "Point",
-        "coordinates": [
-          77.10034438685858,
-          15.6325348009539
-        ]
+        "coordinates": [ 77.10034438685858, 15.6325348009539 ]
       }
     },
     {
@@ -45,15 +39,129 @@
       "properties": {
         "id": 3,
         "Name": "M.P.P Telugu School",
-        "type": "Primary School (Telugu)",
-        "category": "Education"
+        "type": "Primary School",
+        "category": "Primary Education (Telugu Medium)"
       },
       "geometry": {
         "type": "Point",
-        "coordinates": [
-          77.10342190707631,
-          15.634604239468418
-        ]
+        "coordinates": [ 77.10342190707631, 15.634604239468418 ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 4,
+        "Name": "Gram Panchayat Office",
+        "type": "Government Building",
+        "category": "Village Administration"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [ 77.10150000000000, 15.63180000000000 ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 5,
+        "Name": "Sri Ram Mandir",
+        "type": "Temple",
+        "category": "Religious & Cultural"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [ 77.10280000000000, 15.63320000000000 ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 6,
+        "Name": "Hanuman Temple",
+        "type": "Temple",
+        "category": "Religious & Cultural"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [ 77.09980000000000, 15.63120000000000 ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 7,
+        "Name": "Village Primary Health Sub-Center",
+        "type": "Healthcare",
+        "category": "Medical & Health"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [ 77.10420000000000, 15.63210000000000 ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 8,
+        "Name": "Rythu Bharosa Kendra (RBK)",
+        "type": "Agriculture",
+        "category": "Farmer Welfare Center"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [ 77.10110000000000, 15.63500000000000 ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 9,
+        "Name": "Overhead Drinking Water Tank",
+        "type": "Utilities",
+        "category": "Water Supply"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [ 77.10500000000000, 15.63100000000000 ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 10,
+        "Name": "PHDY Community Hall & Youth Center",
+        "type": "Community",
+        "category": "Youth Association HQ"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [ 77.10180000000000, 15.63280000000000 ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 11,
+        "Name": "Pedda Harivanam Bus Stop",
+        "type": "Transportation",
+        "category": "Bus Station"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [ 77.09920000000000, 15.63000000000000 ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 12,
+        "Name": "Village Library & E-Seva Point",
+        "type": "Public Service",
+        "category": "Education & Digital Access"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [ 77.10250000000000, 15.63400000000000 ]
       }
     }
   ]

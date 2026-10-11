@@ -28,64 +28,24 @@ const DEFAULT_POINTS_GEOJSON: any = {
   type: "FeatureCollection",
   name: "Pedda_harivanam_point",
   crs: { type: "name", properties: { name: "urn:ogc:def:crs:OGC:1.3:CRS84" } },
-  features: [
-    {
-      type: "Feature",
-      properties: {
-        id: 1,
-        Name: "Zilla Parisadh High School",
-        type: "High School",
-        category: "Secondary Education (ZPHS)"
-      },
-      geometry: { type: "Point", coordinates: [ 77.102188059346034, 15.630581808142665 ] }
-    },
-    {
-      type: "Feature",
-      properties: {
-        id: 2,
-        Name: "M.P.P Kannada School",
-        type: "Primary School",
-        category: "Primary Education (Kannada Medium)"
-      },
-      geometry: { type: "Point", coordinates: [ 77.10034438685858, 15.6325348009539 ] }
-    },
-    {
-      type: "Feature",
-      properties: {
-        id: 3,
-        Name: "M.P.P Telugu School",
-        type: "Primary School",
-        category: "Primary Education (Telugu Medium)"
-      },
-      geometry: { type: "Point", coordinates: [ 77.10342190707631, 15.634604239468418 ] }
-    }
-  ]
+  features: []
 };
 
-// Custom Building Icon for Schools and Points from Google Drive
+// Location Pin Icon (strictly 📍 location symbol)
 const createBuildingIcon = (name: string = '') => {
-  const isHighSchool = name.toLowerCase().includes('high');
-  const badgeColor = isHighSchool ? '#ea580c' : '#0284c7';
-  const shadowColor = isHighSchool ? 'rgba(234, 88, 12, 0.45)' : 'rgba(2, 132, 199, 0.45)';
-
   return L.divIcon({
     html: `
-      <div class="custom-building-marker" style="transform: translate3d(0,0,0);">
-        <div style="background-color: #ffffff; padding: 6px; border-radius: 12px; border: 2.5px solid ${badgeColor}; box-shadow: 0 4px 16px ${shadowColor}; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.2s ease;">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${badgeColor}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
-            <path d="M6 6h10"/>
-            <path d="M6 10h10"/>
-            <path d="M6 14h10"/>
-            <path d="M18 18h-8"/>
-          </svg>
+      <div style="transform: translate3d(0,0,0); display: flex; flex-direction: column; align-items: center; justify-content: center; filter: drop-shadow(0 6px 12px rgba(234, 88, 12, 0.45));">
+        <div style="background: linear-gradient(135deg, #f97316 0%, #c2410c 100%); width: 36px; height: 36px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); display: flex; align-items: center; justify-content: center; border: 2.5px solid #ffffff; cursor: pointer;">
+          <div style="width: 12px; height: 12px; background-color: #ffffff; border-radius: 50%; transform: rotate(45deg);"></div>
         </div>
+        <div style="width: 6px; height: 4px; background-color: rgba(0,0,0,0.35); border-radius: 50%; margin-top: 2px;"></div>
       </div>
     `,
-    className: 'building-icon-wrapper',
-    iconSize: [36, 36],
-    iconAnchor: [18, 18],
-    popupAnchor: [0, -20]
+    className: 'distinct-map-pin-wrapper',
+    iconSize: [40, 46],
+    iconAnchor: [20, 44],
+    popupAnchor: [0, -38]
   });
 };
 
@@ -229,18 +189,23 @@ const VillageMapPage: React.FC = () => {
     const loadCustomLayers = async () => {
       try {
         const customPoints = await gisLayersService.loadLayer('points');
-        if (customPoints && customPoints.features) {
+        if (customPoints && customPoints.features && customPoints.features.length > 0) {
           setPointData(customPoints);
+        } else {
+          setPointData(DEFAULT_POINTS_GEOJSON);
         }
+
         const customPolygons = await gisLayersService.loadLayer('polygons');
-        if (customPolygons && customPolygons.features) {
+        if (customPolygons && customPolygons.features && customPolygons.features.length > 0) {
           setBoundaryData(customPolygons);
         }
         const customLines = await gisLayersService.loadLayer('lines');
-        if (customLines && customLines.features) {
+        if (customLines && customLines.features && customLines.features.length > 0) {
           setLineData(customLines);
         }
-      } catch (e) {}
+      } catch (e) {
+        setPointData(DEFAULT_POINTS_GEOJSON);
+      }
     };
     loadCustomLayers();
   }, []);
@@ -358,17 +323,13 @@ const VillageMapPage: React.FC = () => {
   };
 
   useEffect(() => {
-    const loadAll = async () => {
+    const loadBoundary = async () => {
       setLoading(true);
-      await Promise.allSettled([
-        fetchPointData(pointUrl),
-        fetchBoundaryData(DEFAULT_BOUNDARY_LINK)
-      ]);
+      await fetchBoundaryData(DEFAULT_BOUNDARY_LINK);
       setLoading(false);
     };
-
-    loadAll();
-  }, [pointUrl]);
+    loadBoundary();
+  }, []);
 
   const handleCustomUrlSubmit = (e: React.FormEvent) => {
     e.preventDefault();
